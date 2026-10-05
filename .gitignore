@@ -48,6 +48,9 @@ CHANGELOG.md
 src/SCRIPTS/GPSHOMER/flights.lua
 src/SCRIPTS/GPSHOMER/sim.lua
 
+# Wingman test data for the simulator
+src/SCRIPTS/WINGMAN/demo.lua
+
 # Sibling widgets symlinked for the simulator
 src/WIDGETS/LIPONY
 src/WIDGETS/SNTNL
