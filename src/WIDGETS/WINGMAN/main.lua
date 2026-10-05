@@ -1115,8 +1115,8 @@ end
 -- most, the sixth carrying "+N" for the older ones not shown.
 local function drawAlerts(L, z, p, pad)
   local top = L.y(POST_COLS_B + 22)
-  btext(pad, top, "ALERTS", COLORS.muted, L.f.label)
   local list, n = p.alerts or {}, #(p.alerts or {})
+  btext(pad, top, (n > 6) and ("ALERTS  +" .. (n - 6)) or "ALERTS", COLORS.muted, L.f.label)
   if n == 0 then
     btext(pad, L.y(POST_COLS_B + 22 + ALERT_ROW_H), "none", COLORS.muted, L.f.value)
     return
@@ -1130,7 +1130,8 @@ local function drawAlerts(L, z, p, pad)
     btext(x, base, t, COLORS.muted, L.f.value)
     local tx = x + textW("00:00 ", L.f.value)
     local text = a.text
-    if i == 6 and n > 6 then text = text .. "  +" .. (n - 6) end
+    -- bottom right: ends before the countdown
+    if i == 6 then text = cutText(text, "", z.w - pad - countdownW(L, "Wait page") - L.s(12) - tx, L.f.value) end
     btext(tx, base, text, levelCol(a.level), L.f.value)
   end
 end
