@@ -191,7 +191,7 @@ local ADDR_FC, ADDR_RADIO = 0xC8, 0xEA
 M.MSP_FC_VARIANT, M.MSP_FC_VERSION, M.MSP_BOARD_INFO = 2, 3, 4
 M.MSP_STATUS_EX, M.MSP2_INAV_STATUS = 150, 0x2000
 local MSP_TIMEOUT  = 100   -- getTime units: 1 s for a reply
-local MSP_GIVE_UP  = 5     -- unanswered requests in a row (ArduPilot never answers)
+local MSP_GIVE_UP_T = 1000 -- no reply at all 10 s after the FC's first FM text: give up (ArduPilot never answers)
 local REASON_EVERY = 200   -- 2 s between arming status polls
 
 -- Arming-disable flag names, Betaflight bit 0 upwards (as its OSD); the last
@@ -282,7 +282,7 @@ mspFrame = function(w, cmd, data)
   if not m or not m.waiting or cmd ~= MSP_RESP then return false end
   local rcmd, p = M.mspReply(data)
   if rcmd ~= m.waiting then return false end
-  m.waiting, m.misses = nil, 0
+  m.waiting, m.answered = nil, true
   if rcmd == M.MSP_FC_VARIANT then
     m.variant = ascii(p, 1, 4)
   elseif rcmd == M.MSP_FC_VERSION then
@@ -304,17 +304,28 @@ mspFrame = function(w, cmd, data)
   return true
 end
 
--- One MSP step per tick: on timeout count a miss, then send the next request
--- when the CRSF module takes one. Results: w.fcInfo, w.armReason.
+-- FM text from the FC on this link, not a stale one from before the loss.
+local function fmCurrent()
+  if getSourceValue then
+    local v, current = getSourceValue("FM")
+    return v ~= nil and current == true
+  end
+  local fm = getValue("FM")
+  return type(fm) == "string" and fm ~= ""
+end
+
+-- One MSP step per tick: drop a request after its timeout, then send the next
+-- when the CRSF module takes one. Without any reply 10 s after the FC's first FM
+-- text it gives up until the next link (a booting FC is still asked). Results:
+-- w.fcInfo, w.armReason.
 local function pollMsp(w, now, armed)
   if not w.linkUp or armed or not crossfireTelemetryPush then return end
-  w.msp = w.msp or { seq = 0, misses = 0 }
+  w.msp = w.msp or { seq = 0 }
   local m = w.msp
-  if m.waiting and now - m.sentAt >= MSP_TIMEOUT then
-    m.waiting, m.misses = nil, m.misses + 1
-  end
+  if not m.fmAt and fmCurrent() then m.fmAt = now end
+  if m.waiting and now - m.sentAt >= MSP_TIMEOUT then m.waiting = nil end
   if not w.armBlocked then m.reason, m.reasonAt = nil, nil end
-  if m.waiting or m.misses >= MSP_GIVE_UP then return end
+  if m.waiting or (not m.answered and m.fmAt and now - m.fmAt >= MSP_GIVE_UP_T) then return end
   -- The GPS core asks for its PDOP every second on the ground: send only while
   -- its request is answered and its next one is at least 0.5 s away.
   local g = w.gps

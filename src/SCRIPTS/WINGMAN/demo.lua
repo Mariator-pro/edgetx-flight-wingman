@@ -67,7 +67,7 @@ local PRE = {
   { pct = 100, sats = 14, gps = "ready", dop = 1.4, fix = "3D", lq = 100, stage = 0, rssi = -42 },
   { pct = 100, sats = 14, gps = "ready", dop = 1.4, fix = "3D", lq = 100, stage = 0, rssi = -42 },
   { pct = 24, sats = 9, gps = "settling", dop = 3.1, fix = "3D", lq = 100, stage = 0, rssi = -45,
-    blocked = true, reason = "THROTTLE, ANGLE" },
+    blocked = true, reason = "RXLOSS, THROTTLE, ANGLE, ARM_SWITCH" },
   { pct = 12, sats = 4, gps = "nofix", fix = "NONE", lq = 38, stage = 2, rssi = -109, blocked = true },
 }
 
@@ -89,7 +89,7 @@ local function pre(w, t, core)
     gps  = { sats = s.sats, state = s.gps, dop = s.dop, dopKind = "PDOP", fix = s.fix },
     link = { modLine = "NOMAD (v4.1.0)", lq = s.lq, stage = s.stage, mode = "X100Hz Full", rssi = s.rssi,
              tpwr = 1000 },
-    armBlocked = s.blocked, armReason = s.reason, fcInfo = "BTFL 4.5.1, SPEEDYBEEF405",
+    armBlocked = s.blocked, armReason = s.reason, fcInfo = "BTFL 2025.12.4, STM32F7X2",
   }
 end
 

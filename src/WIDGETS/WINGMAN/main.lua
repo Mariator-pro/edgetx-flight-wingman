@@ -966,8 +966,7 @@ local function secsLeft(since, total)
 end
 
 -- Countdown at the bottom right (preflight and post-flight page): text left of
--- a bar that runs empty. countdownW is the width it takes, reserved also while
--- it does not run so nothing moves.
+-- a bar that runs empty. countdownW is the width it takes.
 local function countdownW(L, label)
   return L.x(CD_BAR_W) + L.s(12) + textW(label .. " in 00 s", SMLSIZE)
 end
@@ -975,9 +974,10 @@ local function drawCountdown(z, secs, total, label)
   drawCornerBar(z, string.format("%s in %d s", label, secs), secs / total, COLORS.muted)
 end
 
--- Ready field left, the line (arming blocked in yellow) and the versions right
--- of it, cut short of the countdown's place at the bottom right.
-local function drawReady(L, z, top, p, st)
+-- Ready field left; right of it the versions on top and below the line
+-- (arming blocked in yellow), both to the right edge. While the countdown runs
+-- (GO, "All modules ready") the line stops short of it.
+local function drawReady(L, z, top, p, st, counting)
   local bw, bh = L.x(READY_W), L.s(READY_H)
   local bx, by = L.x(18), top + math.floor((z.h - top - bh) / 2)
   fillRounded(bx, by, bw, bh, L.s(10), (st.ready == "GO") and COLORS.accent or WARN_COL)
@@ -986,16 +986,17 @@ local function drawReady(L, z, top, p, st)
   dtext(bx + math.floor(bw / 2), by + math.floor((bh - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5), st.ready,
         DARK_TEXT, f + CENTER)
   local tx = bx + bw + L.x(18)
-  local tw = z.w - tx - L.x(18) - countdownW(L, "Flight page") - L.x(18)
-  if st.line then
-    btext(tx, by + math.floor(bh * 0.45), cutText(st.line, "", tw, L.f.value),
-          p.armBlocked and WARN_COL or COLORS.fg, L.f.value)
-  end
+  local tw = z.w - tx - L.x(18)
   local ver = getVersion and getVersion()
   local parts = {}
   if p.fcInfo then parts[#parts + 1] = p.fcInfo end
   if ver then parts[#parts + 1] = "EdgeTX " .. ver end
-  btext(tx, by + bh - L.s(8), cutText(table.concat(parts, ", "), "", tw, L.f.cap), COLORS.muted, L.f.cap)
+  btext(tx, by + math.floor(bh * 0.4), cutText(table.concat(parts, ", "), "", tw, L.f.cap), COLORS.muted, L.f.cap)
+  if st.line then
+    if counting then tw = tw - countdownW(L, "Flight page") - L.x(18) end
+    btext(tx, by + bh - L.s(8), cutText(st.line, "", tw, L.f.value),
+          p.armBlocked and WARN_COL or COLORS.fg, L.f.value)
+  end
 end
 
 local function drawPre(ctx)
@@ -1016,9 +1017,10 @@ local function drawPre(ctx)
   end
   if p.gps and c[3] then drawPreGps(L, c[3], c[4], p.gps, st) end
   if p.link and c[5] then drawPreLink(L, c[5], c[6], p.link, st, w.linkUp) end
-  drawReady(L, z, top, p, st)
   local fs = w.fs
-  if fs and fs.readySince and w.phase == core.PRE then   -- GO: countdown to the flight page
+  local counting = fs and fs.readySince and w.phase == core.PRE
+  drawReady(L, z, top, p, st, counting)
+  if counting then   -- GO: countdown to the flight page
     drawCountdown(z, secsLeft(fs.readySince, core.PRE_HOLD_T), core.PRE_HOLD_T / 1000, "Flight page")
   end
 end

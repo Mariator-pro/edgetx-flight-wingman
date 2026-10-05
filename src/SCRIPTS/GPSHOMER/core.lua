@@ -93,7 +93,7 @@ M.PARAMS = {
   MAX_ALT_HYST    = 10,    -- must drop this far below MAX_ALT before it can announce again
   DOP_POLL_T      = 1,     -- MSP request interval on the ground (s)
   DOP_STALE_T     = 3,     -- a DOP older than this is not shown (s)
-  DOP_MAX_MISSES  = 5,     -- unanswered requests in a row before giving up
+  DOP_GIVE_UP_T   = 10,    -- no reply at all this long after the first request on this link: give up (s)
   COURSE_MIN_SPD = 6,      -- FR-10: km/h below which the GPS course is not usable
   COURSE_HYST    = 1,      -- km/h either side of COURSE_MIN_SPD before the course flips
   COURSE_HOLD_T  = 1,      -- speed must stay beyond the hysteresis band this long (s)
@@ -878,7 +878,8 @@ function M.handleFrame(state, cmd, data, now)
     local dop = M.parseRawGpsDop(data)
     if dop ~= nil then
       state.dopWaiting = false
-      state.dopMisses  = dop and 0 or P.DOP_MAX_MISSES   -- only a missing field gives up
+      state.dopAnswered = true
+      if dop == false then state.dopGaveUp = true end   -- only a missing field gives up
       if dop and dop > 0 then state.dop, state.dopAt = dop, now end
       -- Read in readSnapshot: the FM text may tell the firmware only after this frame.
       state.fixReply, state.fix, state.fixAt = data, nil, now
@@ -891,27 +892,27 @@ function M.handleFrame(state, cmd, data, now)
   end
 end
 
--- One DOP step per tick: send the next MSP request when due. Requests stop after
--- DOP_MAX_MISSES unanswered ones or a reply without the DOP field (ArduPilot
--- does not answer MSP, older firmware lacks the field); a reply without a fix
--- keeps asking. Returns the last DOP while it is fresh, else nil.
+-- One DOP step per tick: send the next MSP request when due. Requests stop when
+-- no reply came DOP_GIVE_UP_T after the first one on this link, or after a reply
+-- without the DOP field (ArduPilot does not answer MSP, older firmware lacks the
+-- field); a reply without a fix keeps asking. Returns the last DOP while it is
+-- fresh, else nil.
 local function pollDop(state, ground, now)
   local P = M.PARAMS
   state.dopGround = ground
   -- Frames of this cycle were handed over before, so a passthrough frame that
   -- just came in already counts. ArduPilot answers no MSP: no requests (and no
   -- telemetry boost) at all.
-  local active = ground and state.dopMisses < P.DOP_MAX_MISSES and state.fcKind ~= "AP"
+  if state.dopFirstAt and not state.dopAnswered and now - state.dopFirstAt >= P.DOP_GIVE_UP_T * 1000 then
+    state.dopGaveUp, state.dopWaiting = true, false
+  end
+  local active = ground and not state.dopGaveUp and state.fcKind ~= "AP"
   if active and crossfireTelemetryPush
      and (state.dopSentAt == nil or now - state.dopSentAt >= P.DOP_POLL_T * 1000)
      and crossfireTelemetryPush() then   -- nil: no CRSF module, false: buffer busy
-    if state.dopWaiting then state.dopMisses = state.dopMisses + 1 end
-    if state.dopMisses < P.DOP_MAX_MISSES then
-      crossfireTelemetryPush(MSP_REQ, M.mspRequest(state.dopSeq, M.MSP_RAW_GPS))
-      state.dopSeq, state.dopSentAt, state.dopWaiting = (state.dopSeq + 1) % 16, now, true
-    else
-      state.dopWaiting = false
-    end
+    crossfireTelemetryPush(MSP_REQ, M.mspRequest(state.dopSeq, M.MSP_RAW_GPS))
+    state.dopSeq, state.dopSentAt, state.dopWaiting = (state.dopSeq + 1) % 16, now, true
+    state.dopFirstAt = state.dopFirstAt or now
   end
   if state.dopAt and now - state.dopAt <= P.DOP_STALE_T * 1000 then return state.dop end
   return nil
@@ -1015,6 +1016,7 @@ function M.resetFlight(state)
   state.moveSince        = nil   -- movement timer for the lock
   state.lastArmed        = nil   -- last armed state (nil = not seen yet; no edge)
   state.preReady         = false -- preflight check met on the last tick (for flightPhase)
+  state.preHold          = nil   -- last online preflight values (sats, fixLost, DOP, fix)
   state.courseValid      = false -- debounced course validity (updateCourseValid)
   state.courseSince      = nil
   state.readyAnnounced   = false
@@ -1037,20 +1039,26 @@ function M.resetFlight(state)
   state.lastAlt  = nil
 end
 
+-- MSP polling starts anew with every link (a battery swap may bring another FC):
+-- reset when the link is gone, so a request sent on the new link's first tick stays.
+local function resetMsp(state)
+  state.dop, state.dopAt = nil, nil   -- last DOP over MSP and when it came
+  state.fix, state.fixAt = nil, nil   -- last fix type ("NONE" / "2D" / "3D") and when it came
+  state.fixReply    = nil       -- or the MSP reply it is read from
+  state.dopSentAt   = nil       -- last MSP request
+  state.dopWaiting  = false     -- request sent, reply outstanding
+  state.dopFirstAt  = nil       -- first request on this link
+  state.dopAnswered = false     -- any reply on this link
+  state.dopGaveUp   = false     -- no more requests on this link
+  state.fcKind      = nil       -- "BF" / "INAV" / "AP" once the FM text or a passthrough frame told
+end
+
 function M.newState()
   local s = {}
   M.resetFlight(s)
+  resetMsp(s)
   s.phase = "WAITING"         -- flight phase (flightPhase); its link fields live here too
-  -- MSP polling lives across flights (resetFlight runs on the first tick too);
-  -- a new widget instance, e.g. after a model change, tries again.
-  s.dop, s.dopAt = nil, nil   -- last DOP over MSP and when it came
-  s.fix, s.fixAt = nil, nil   -- last fix type ("NONE" / "2D" / "3D") and when it came
-  s.fixReply     = nil        -- or the MSP reply it is read from
-  s.dopSentAt    = nil        -- last MSP request
-  s.dopWaiting   = false      -- request sent, reply outstanding
-  s.dopMisses    = 0          -- unanswered in a row
   s.dopSeq       = 0
-  s.fcKind       = nil        -- "BF" / "INAV" / "AP" once the FM text or a passthrough frame told
   s.dopGround    = false      -- last tick was on the ground before the first flight (handleFrame)
   return s
 end
@@ -1086,6 +1094,14 @@ local function preflightMet(r)
   return pf.level == 0 and pf.dopStage == 0
 end
 
+-- End of an online tick: preflight check for flightPhase, and the preflight
+-- values held for a dropout shorter than the link-loss time.
+local function finishLive(state, result)
+  state.preReady = preflightMet(result)
+  state.preHold = { sats = result.sats, fixLost = result.fixLost, dop = result.dop,
+                    dopKind = result.dopKind, fix = result.fix }
+end
+
 function M.evaluate(state, snap, now)
   local P      = M.PARAMS
   local result = {}
@@ -1101,6 +1117,7 @@ function M.evaluate(state, snap, now)
   -- Flight phase from the link, the armed state and the last tick's preflight
   -- check. A new flight (also after the end hold) starts from a clean state.
   local phase, event = flightPhase(state, snap.telem, snap.armed, state.preReady, now)
+  if event == "end" or event == "lost" then resetMsp(state) end
   if event == "end" then
     -- Armed before the gap: link failure, the flight goes on when the link is
     -- back. Disarmed or unknown: the flight is over. Position frozen (FR-13).
@@ -1119,6 +1136,11 @@ function M.evaluate(state, snap, now)
   -- ---- telemetry offline ----
   if not snap.telem then
     result.gpsState = gpsStateOf(state)
+    local hold = phase == "PRE" and state.preHold   -- dropout shorter than the link-loss time
+    if hold then
+      result.sats, result.fixLost, result.dop, result.dopKind, result.fix =
+        hold.sats, hold.fixLost, hold.dop, hold.dopKind, hold.fix
+    end
     result.lastLat  = state.lastLat
     result.lastLon  = state.lastLon
     if phase == "ENDED" then
@@ -1239,7 +1261,7 @@ function M.evaluate(state, snap, now)
       if result.courseValid then result.course = state.lastHdg or 0 end
       result.sensorMissing = snap.sensorMissing
       setDop(result, snap)
-      state.preReady = preflightMet(result)
+      finishLive(state, result)
       return result
     end
     state.fixLostSince = nil   -- clean slate for the ACTIVE debounce
@@ -1349,7 +1371,7 @@ function M.evaluate(state, snap, now)
   result.fixLost           = state.fixLost   -- persistent flag: widget colours sats red
   result.alert             = snap.alert      -- "RTH" / "FS" from the FC, nil otherwise
   result.sensorMissing = snap.sensorMissing
-  state.preReady = preflightMet(result)
+  finishLive(state, result)
   return result
 end
 
