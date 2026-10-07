@@ -518,7 +518,7 @@ local function flightView(w, on)
     local P = w.mods.gps.PARAMS
     v.gps = { sats = g.sats, course = g.course, bearing = g.bearingToHome, rel = g.rel, dist = g.distanceM,
               atHome = g.atHome, gpsState = g.gpsState, noHome = g.noHome, sector = g.sector,
-              courseValid = g.courseValid, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
+              courseValid = g.courseValid, estimated = g.noseEstimated, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
               alt = g.alt }
   end
   if r and r.status == "running" then v.link = linkView(w, r) end

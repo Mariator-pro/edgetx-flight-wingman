@@ -770,7 +770,8 @@ local function drawGps(L, x, w, g, alert, ctx)
     sm.course = compass.smooth(sm.course, g.course)
     sm.rel    = compass.smooth(sm.rel, g.rel)
     local kind, lb = compass.label({ gpsState = g.gpsState, noHome = g.noHome, atHome = g.atHome, alert = alert,
-                                     courseValid = g.courseValid, rel = sm.rel, sector = g.sector, bearing = g.bearing },
+                                     courseValid = g.courseValid, estimated = g.estimated, rel = sm.rel,
+                                     sector = g.sector, bearing = g.bearing },
                                    { ahead = g.ahead or 15, behind = g.behind or 165 })
     local cx, base = x + math.floor(w / 2), L.y(308)
     drawCompass(L, cx, L.y(208), g, kind, sm.course, sm.rel)

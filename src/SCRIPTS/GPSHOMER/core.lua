@@ -53,6 +53,8 @@ M.SENSORS = {
   alt  = "Alt",    -- altitude; GAlt (GPS altitude) is preferred when discovered
   galt = "GAlt",
   fm   = "FM",     -- flight mode text; carries the armed state (optional)
+  yaw  = "Yaw",    -- nose direction from the FC attitude (CRSF only, optional)
+  roll = "Roll",
 }
 
 -- Event sounds. Folder fixed (folder upper, files lower, as in the repo);
@@ -97,6 +99,11 @@ M.PARAMS = {
   COURSE_MIN_SPD = 6,      -- FR-10: km/h below which the GPS course is not usable
   COURSE_HYST    = 1,      -- km/h either side of COURSE_MIN_SPD before the course flips
   COURSE_HOLD_T  = 1,      -- speed must stay beyond the hysteresis band this long (s)
+  YAW_LEARN_SPD  = 25,     -- yaw offset: learnt only at this speed or more (km/h)
+  YAW_LEARN_T    = 2,      -- ... over a window this long (s)
+  YAW_LEARN_TURN = 10,     -- ... in which course and yaw change by at most this (deg)
+  YAW_LEARN_ROLL = 10,     -- ... and the roll stays below this (deg)
+  YAW_OFFSET_T   = 60,     -- a learnt offset holds this long (s; gyro drift without compass)
   HOME_STABLE_T  = 3,      -- fix must stay ok this long for "ready" / home set without FM (s)
   MOVE_LOCK_T    = 1,      -- moving this long before home is set locks home (no FM only) (s)
   HOME_NEAR_M    = 15,     -- closer than this: "at home", no arrow / bearing (m)
@@ -352,6 +359,42 @@ function M.updateCourseValid(state, gspd, now)
     end
   end
   return state.courseValid
+end
+
+-- Nose below COURSE_MIN_SPD: while flying fast and straight, the offset between
+-- the FC's yaw and the GPS course is learnt (circular mean over a calm window;
+-- turns, sideways flight and strong crosswind are left out). Hovering, yaw minus
+-- that offset stands in for the course, so the arrow stays nose-relative. Works
+-- with or without a compass: only the yaw change since the window counts.
+local function angDiff(a, b) return math.abs(M.relAngle(a, b)) end
+function M.learnYawOffset(state, gspd, hdg, yaw, roll, now)
+  local P, w = M.PARAMS, state.yawWin
+  if not (gspd and hdg and yaw and roll) or gspd < P.YAW_LEARN_SPD or math.abs(roll) >= P.YAW_LEARN_ROLL then
+    state.yawWin = nil
+    return
+  end
+  if w and (angDiff(hdg, w.hdg) > P.YAW_LEARN_TURN or angDiff(yaw, w.yaw) > P.YAW_LEARN_TURN) then w = nil end
+  if not w then
+    w = { t = now, hdg = hdg, yaw = yaw, s = 0, c = 0 }
+    state.yawWin = w
+  end
+  local d = math.rad(yaw - hdg)
+  w.s, w.c = w.s + math.sin(d), w.c + math.cos(d)
+  if now - w.t >= P.YAW_LEARN_T * 1000 then
+    state.yawOffset, state.yawOffsetAt = (math.deg(atan2(w.s, w.c)) + 360) % 360, now
+    state.yawWin = nil
+  end
+end
+
+-- Nose for the display: the GPS course while it is valid, else yaw minus the
+-- learnt offset while that is fresh. Returns valid, course, estimated.
+function M.noseOf(state, now)
+  if M.updateCourseValid(state, state.lastGspd, now) then return true, state.lastHdg or 0, false end
+  local yaw = state.lastYaw
+  if yaw and state.yawOffsetAt and now - state.yawOffsetAt <= M.PARAMS.YAW_OFFSET_T * 1000 then
+    return true, (yaw - state.yawOffset + 360) % 360, true
+  end
+  return false
 end
 
 -- ---------------------------------------------------------------------------
@@ -934,6 +977,11 @@ function M.readSnapshot(state, now)
   local rawAlt  = readPresent(has, S, "galt")
   if rawAlt == nil then rawAlt = readPresent(has, S, "alt") end
   local alt     = M.validRange(rawAlt, -500, 10000)
+  -- Attitude in rad (-pi..pi; older firmware 0..2pi) -> yaw 0..360, roll -180..180.
+  local yaw     = M.validRange(readPresent(has, S, "yaw"), -7, 7)
+  local roll    = M.validRange(readPresent(has, S, "roll"), -7, 7)
+  yaw  = yaw and (math.deg(yaw) % 360)
+  roll = roll and (math.deg(roll) + 540) % 360 - 180
 
   local telem = linkUp()
 
@@ -968,6 +1016,8 @@ function M.readSnapshot(state, now)
     gspd          = gspd,
     hdg           = hdg,
     alt           = alt,
+    yaw           = yaw,
+    roll          = roll,
     armed         = armed,
     armedKnown    = armedKnown,
     fmText        = type(fm) == "string" and fm ~= "",   -- any FM text this sample
@@ -1037,6 +1087,11 @@ function M.resetFlight(state)
   state.lastGspd = nil
   state.lastHdg  = nil
   state.lastAlt  = nil
+  state.lastYaw  = nil
+  state.lastRoll = nil
+  state.yawWin      = nil   -- yaw offset learning window (learnYawOffset)
+  state.yawOffset   = nil   -- learnt yaw minus course (deg) and when
+  state.yawOffsetAt = nil
 end
 
 -- MSP polling starts anew with every link (a battery swap may bring another FC):
@@ -1113,6 +1168,8 @@ function M.evaluate(state, snap, now)
   if snap.gspd then state.lastGspd = snap.gspd end
   if snap.hdg  then state.lastHdg  = snap.hdg  end
   if snap.alt  then state.lastAlt  = snap.alt  end
+  if snap.yaw  then state.lastYaw  = snap.yaw  end
+  if snap.roll then state.lastRoll = snap.roll end
 
   -- Flight phase from the link, the armed state and the last tick's preflight
   -- check. A new flight (also after the end hold) starts from a clean state.
@@ -1257,8 +1314,8 @@ function M.evaluate(state, snap, now)
       result.sats          = snap.sats or state.lastSats
       result.gspd          = state.lastGspd   -- no ALT without home: nothing to be relative to
       result.fixLost       = not fixOk
-      result.courseValid   = M.updateCourseValid(state, state.lastGspd, now)
-      if result.courseValid then result.course = state.lastHdg or 0 end
+      M.learnYawOffset(state, state.lastGspd, state.lastHdg, state.lastYaw, state.lastRoll, now)
+      result.courseValid, result.course, result.noseEstimated = M.noseOf(state, now)
       result.sensorMissing = snap.sensorMissing
       setDop(result, snap)
       finishLive(state, result)
@@ -1330,11 +1387,10 @@ function M.evaluate(state, snap, now)
     result.distanceM     = M.haversine(lat, lon, state.homeLat, state.homeLon)
     result.bearingToHome = M.bearingTo(lat, lon, state.homeLat, state.homeLon)
     result.sector        = M.sectorOf(result.bearingToHome)
-    result.courseValid   = M.updateCourseValid(state, state.lastGspd, now)
-    if result.courseValid then
-      result.course = state.lastHdg or 0     -- GPS course, for the compass ring
-      result.rel    = M.relAngle(result.bearingToHome, result.course)
-    end
+    M.learnYawOffset(state, state.lastGspd, state.lastHdg, state.lastYaw, state.lastRoll, now)
+    -- GPS course (or the yaw estimate while hovering), for the compass ring
+    result.courseValid, result.course, result.noseEstimated = M.noseOf(state, now)
+    if result.courseValid then result.rel = M.relAngle(result.bearingToHome, result.course) end
     -- (Nearly) on the home point: any direction to it would be GPS noise.
     result.atHome = result.distanceM < P.HOME_NEAR_M
   end

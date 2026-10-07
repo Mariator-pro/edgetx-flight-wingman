@@ -210,7 +210,8 @@ local ALERTS = {
 }
 
 -- What the compass shows and the text under it, the same on both widgets.
--- d = { gpsState, noHome, atHome, alert, courseValid, rel, sector, bearing }.
+-- d = { gpsState, noHome, atHome, alert, courseValid, estimated, rel, sector,
+-- bearing }; estimated (nose from yaw while hovering) puts "~" before the hint.
 -- Returns kind ("ring": ring without arrow before home; "house": ring with the
 -- house on the home point; "arrow": the compass with arrow) and the label
 -- { cap ("HOME" or nil), text, short (for little room), ref (widest text of its
@@ -227,7 +228,7 @@ function C.label(d, P)
   end
   if a then return "arrow", { text = a[1], short = a[2], ref = a[1], col = a[3] } end
   if d.courseValid and d.rel then
-    return "arrow", { cap = "HOME", text = C.relText(d.rel, P), ref = "180 R", col = "fg" }
+    return "arrow", { cap = "HOME", text = (d.estimated and "~" or "") .. C.relText(d.rel, P), ref = "~180 R", col = "fg" }
   end
   local t = string.format("%s %d\194\176", d.sector or "?", math.floor((d.bearing or 0) + 0.5))
   return "arrow", { cap = "HOME", text = t, short = t, ref = "NW 360\194\176", col = "fg" }
