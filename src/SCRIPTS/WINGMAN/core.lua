@@ -484,8 +484,11 @@ end
 local function linkView(w, r)
   local snap = r.snapshot or {}
   local lqLevel = w.mods.link and w.mods.link.lqLevel
+  local dual = snap.rss2 ~= nil and snap.rss2 ~= 0
   return { modLine = (w.link and w.link.modLine) or "LINK", lq = snap.rqly, stage = r.stage or 0, sensLimit = r.sensLimit,
            mode = r.modeName, rssi = r.linkRssi, tpwr = snap.tpwr, ant = snap.ant, range = r.rangePct,
+           -- both antennas only from a dual-antenna receiver (2RSS 0: single antenna)
+           rss1 = dual and snap.rss1 or nil, rss2 = dual and snap.rss2 or nil, rsnr = snap.rsnr,
            lqStage = (lqLevel and snap.rqly) and lqLevel(snap.rqly) or nil }
 end
 

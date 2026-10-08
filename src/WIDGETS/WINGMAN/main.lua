@@ -625,9 +625,22 @@ local function modeParts(mode)
 end
 
 -- Label over value, rows from the given design y.
-local function drawCell(L, x, row0, label, value, col)
+-- draw (optional) draws value itself: draw(L, x, baseline y, value).
+local function drawCell(L, x, row0, label, value, col, draw)
   btext(x, L.y(row0 + 10), label, COLORS.muted, L.f.label)
+  if draw then draw(L, x, L.y(row0 + 36), value) return end
   btext(x, L.y(row0 + 36), value, col or COLORS.fg, L.f.value)
+end
+
+-- RSSI of both antennas, the inactive one grey. One value without a second antenna.
+local function drawRssi(L, x, y, l)
+  if not l.rss2 then btext(x, y, fmt("%d", l.rssi), COLORS.fg, L.f.value) return end
+  for i, v in ipairs({ l.rss1, l.rss2 }) do
+    local text = fmt("%d", v)
+    btext(x, y, text, (l.ant and l.ant ~= i) and COLORS.muted or COLORS.fg, L.f.value)
+    x = x + textW(text, L.f.value)
+    if i == 1 then btext(x, y, " / ", COLORS.fg, L.f.value); x = x + textW(" / ", L.f.value) end
+  end
 end
 
 -- Rows on a 57 px pitch from y 249, so the battery's third row lines up with
@@ -638,7 +651,7 @@ local function drawGrid(L, x, w, cells)
   local half = math.floor(w / 2)
   for i, c in ipairs(cells) do
     local row = math.floor((i - 1) / 2)
-    drawCell(L, x + ((i - 1) % 2) * half, GRID_TOP + GRID_PITCH * row, c[1], c[2], c[3])
+    drawCell(L, x + ((i - 1) % 2) * half, GRID_TOP + GRID_PITCH * row, c[1], c[2], c[3], c[4])
   end
 end
 
@@ -727,8 +740,8 @@ local function drawLink(L, x, w, l, linkUp)
 
   drawGrid(L, x, w, {
     { "LQ", fmt("%d %%", l.lq), l.lqStage and levelCol(l.lqStage) },
-    { "RSSI", fmt("%d dBm", l.rssi) },
-    { "ANTENNA", fmt("%d", l.ant) },
+    { "RSSI dBm", l, nil, drawRssi },
+    { "RSNR", fmt("%d dB", l.rsnr) },
     { "TX POWER", fmt("%d mW", l.tpwr) },
   })
 end
@@ -960,7 +973,7 @@ local function drawPreLink(L, x, w, l, st, linkUp)
   local modeCap, modeVal = modeParts(l.mode)
   drawHero(L, x, right, fmt("%d", l.lq), "%", st.lqLevel and levelCol(st.lqLevel) or COLORS.fg, "LQ", modeCap, modeVal)
   local half = math.floor(w / 2)
-  drawCell(L, x, PRE_ROW0, "RSSI", fmt("%d dBm", l.rssi))
+  drawCell(L, x, PRE_ROW0, "RSSI dBm", l, nil, drawRssi)
   drawCell(L, x + half, PRE_ROW0, "TX POWER", fmt("%d mW", l.tpwr))
   drawStatus(L, x, st.link)
 end
