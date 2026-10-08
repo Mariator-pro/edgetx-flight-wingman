@@ -113,7 +113,7 @@ M.PARAMS = {
   FLOWN_STEP_M   = 10,     -- flown distance counts a move only once this far from the last counted point (m)
   FLOWN_JUMP_M   = 1000,   -- a step longer than this is a GPS glitch and not counted (m)
   TRACK_STEP_M   = 20,     -- flight track: a point once this far from the last one (m)
-  TRACK_MAX      = 100,    -- flight track: points kept, the oldest go first (about the last 2 km)
+  TRACK_MAX      = 50,     -- flight track: points kept, the oldest go first (about the last 1 km)
   FIX_LOSS_T     = 3,      -- NFR-4: fix-loss debounce (s)
   AHEAD_DEG      = 15,     -- |rel| <= this -> "ahead"
   BEHIND_DEG     = 165,    -- |rel| >= this -> "behind"

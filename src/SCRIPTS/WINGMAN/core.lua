@@ -527,14 +527,17 @@ end
 
 -- Search view from the GPS core's own state: home, last position, link.
 -- The last source is kept: a new link resets the GPS core's home, while the
--- search page stays until it is closed or the model is armed.
+-- search page stays until it is closed or the model is armed. The source table
+-- lives as long as home and track, so searchView converts the track only once.
 local function searchFromGps(w, now)
   local st, g = w.gps, w.gpsRes or {}
   local src = w.searchSrc
   if st and st.homeLat and st.lastLat then
-    src = { homeLat = st.homeLat, homeLon = st.homeLon, lat = st.lastLat, lon = st.lastLon, track = st.track or {},
-            course = g.course, sats = g.sats, alt = g.alt }
-    w.searchSrc = src
+    if not src or src.homeLat ~= st.homeLat or src.homeLon ~= st.homeLon or src.track ~= st.track then
+      src = { homeLat = st.homeLat, homeLon = st.homeLon, track = st.track }
+      w.searchSrc = src
+    end
+    src.lat, src.lon, src.course, src.sats, src.alt = st.lastLat, st.lastLon, g.course, g.sats, g.alt
   elseif src and st and st.lastLat and w.linkUp then
     src.lat, src.lon = st.lastLat, st.lastLon   -- relinked as a new flight: live position, old home
   end
@@ -726,26 +729,34 @@ end
 
 -- Search page data from a position source: home and model position (degrees),
 -- track = { { lat, lon }, ... }, course (deg or nil), sats, alt (m), live
--- (position current) and ageS. n/e are metres north/east of home; geometry
--- from the GPS core.
+-- (position current) and ageS. n/e are metres north/east of home; the model's
+-- from the GPS core's geometry, the track flat (degrees times metres per degree):
+-- up to 50 points through haversine would break the widget's instruction limit,
+-- and over a few km the two differ by far less than a pixel. The track stops
+-- growing once the search starts (disarmed or no link), so its conversion is kept
+-- on src until a new point arrives.
 function M.searchView(gps, src)
-  local function offset(lat, lon)
-    local d = gps.haversine(src.homeLat, src.homeLon, lat, lon)
-    local b = math.rad(gps.bearingTo(src.homeLat, src.homeLon, lat, lon))
-    return d * math.cos(b), d * math.sin(b), d
+  local tr = src.track or {}
+  if not src.trackNE or src.trackLast ~= tr[#tr] then
+    local kn = math.rad(6371000)   -- metres per degree on the GPS core's sphere
+    local ke = kn * math.cos(math.rad(src.homeLat))
+    local ne, max2 = {}, 0
+    for i, p in ipairs(tr) do
+      local n, e = (p[1] - src.homeLat) * kn, (p[2] - src.homeLon) * ke
+      ne[i] = { n, e }
+      if n * n + e * e > max2 then max2 = n * n + e * e end
+    end
+    src.trackNE, src.trackMaxM, src.trackLast = ne, math.sqrt(max2), tr[#tr]
   end
   local v = { lat = src.lat, lon = src.lon, course = src.course, sats = src.sats,
-              alt = src.alt, live = src.live, ageS = src.ageS, track = {} }
-  v.n, v.e, v.distM = offset(src.lat, src.lon)
+              alt = src.alt, live = src.live, ageS = src.ageS, track = src.trackNE }
+  v.distM = gps.haversine(src.homeLat, src.homeLon, src.lat, src.lon)
   v.bearing = gps.bearingTo(src.homeLat, src.homeLon, src.lat, src.lon)
+  local b = math.rad(v.bearing)
+  v.n, v.e = v.distM * math.cos(b), v.distM * math.sin(b)
   v.sector = gps.sectorOf(v.bearing)
   v.url = gps.mapUrl(src.lat, src.lon)
-  v.maxM = v.distM
-  for i, p in ipairs(src.track or {}) do
-    local n, e, d = offset(p[1], p[2])
-    v.track[i] = { n, e }
-    if d > v.maxM then v.maxM = d end
-  end
+  v.maxM = math.max(v.distM, src.trackMaxM)
   return v
 end
 

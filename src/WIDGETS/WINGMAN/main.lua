@@ -378,10 +378,15 @@ local function drawMap(v, x0, y0, s, pad)
   dtext(cx, cy + rl - math.floor(fh / 2), "S", COLORS.muted, SMLSIZE + CENTER)
   dtext(cx - rl, cy - math.floor(fh / 2), "W", COLORS.muted, SMLSIZE + CENTER)
 
+  -- Track inlined and without zero-length segments: up to 50 points per call.
+  local trail, line, floor = COLORS.trail, lcd.drawLine, math.floor
   local px, py
-  for i, p in ipairs(v.track) do
-    local x, y = xy(p[1], p[2])
-    if i > 1 then thickLine(px, py, x, y, COLORS.trail) end
+  for _, p in ipairs(v.track) do
+    local x, y = floor(cx + p[2] * k + 0.5), floor(cy - p[1] * k + 0.5)
+    if px and (x ~= px or y ~= py) then
+      line(px, py, x, y, SOLID, trail)
+      line(px + 1, py, x + 1, y, SOLID, trail)
+    end
     px, py = x, y
   end
   thickLine(cx, cy, mx, my, WARN_COL, DOTTED)
