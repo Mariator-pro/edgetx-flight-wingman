@@ -790,8 +790,8 @@ local function drawGps(L, x, w, g, alert, ctx)
   end
 
   local half = math.floor(w / 2)
-  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d m", g.alt))
-  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d m", g.dist))
+  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d m", g.alt), g.altOver and CRIT_COL)
+  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d m", g.dist), g.distOver and CRIT_COL)
 end
 
 -- Column lines from top (default: under the header) down to bottom. All three

@@ -24,15 +24,20 @@ return function(core)
     },
 
     fields = {
-      { key = "homeMinSats", page = "warnings", label = "Home min sats",
+      { key = "homeMinSats", page = "warnings", label = "Minimum satellites",
         min = L.homeMinSats.min, max = L.homeMinSats.max, step = L.homeMinSats.step,
         default = D.homeMinSats,
-        hint = "Home is set once %v sats are stable" },
+        hint = "Home is set once %v satellites are stable" },
       { key = "maxAlt", page = "warnings", label = "Max altitude",
         min = L.maxAlt.min, max = L.maxAlt.max, step = L.maxAlt.step,
         default = D.maxAlt, off = 0,
         unit = function() return core.PARAMS.UNITS == "imperial" and "ft" or "m" end,
         hint = "Announce once when higher than %v above home" },
+      { key = "maxDist", page = "warnings", label = "Max distance",
+        min = L.maxDist.min, max = L.maxDist.max, step = L.maxDist.step,
+        default = D.maxDist, off = 0,
+        unit = function() return core.PARAMS.UNITS == "imperial" and "ft" or "m" end,
+        hint = "Announce once when farther than %v from home" },
       { key = "audio", page = "alerts", label = "Sounds", shared = true,
         type = "bool", default = D.audio, hint = "Off silences every announcement, vibration stays" },
       { key = "haptic", page = "alerts", label = "Vibration", shared = true,
@@ -47,8 +52,9 @@ return function(core)
       ready = { label = "Ready to fly", hint = "GPS fix is stable, safe to arm" },
       fix   = { label = "Home set",     hint = "Home stored when arming (or at first stable fix)" },
       lost  = { label = "GPS lost",     hint = "GPS fix lost for a few seconds" },
-      rec   = { label = "GPS recover",  hint = "GPS fix is back after a loss" },
+      rec   = { label = "GPS recovered", hint = "GPS fix is back after a loss" },
       alt   = { label = "Max altitude", hint = "Higher than Max altitude above home" },
+      dist  = { label = "Max distance", hint = "Farther than Max distance from home" },
     },
 
     resets = {

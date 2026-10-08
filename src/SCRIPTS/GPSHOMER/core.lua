@@ -72,15 +72,16 @@ M.SOUNDS = {
   fix  = "gpsfix.wav",   -- "home set"
   lost = "gpslost.wav",  -- "GPS lost"
   rec  = "gpsrec.wav",   -- "GPS recovered"
-  alt  = "altitude.wav", -- "Warning, maximum altitude"
+  alt  = "altitude.wav", -- "maximum altitude"
+  dist = "distance.wav", -- "maximum distance"
 }
 
 -- Factory defaults for the event sounds, frozen BEFORE any config overlay so the
 -- tool can offer a true "Default" per event and applyConfigOverrides stays
 -- idempotent regardless of call order.
 M.SOUND_DEFAULTS = { ready = M.SOUNDS.ready, fix = M.SOUNDS.fix, lost = M.SOUNDS.lost, rec = M.SOUNDS.rec,
-                     alt = M.SOUNDS.alt }
-M.SOUND_KEYS     = { "ready", "fix", "lost", "rec", "alt" }
+                     alt = M.SOUNDS.alt, dist = M.SOUNDS.dist }
+M.SOUND_KEYS     = { "ready", "fix", "lost", "rec", "alt", "dist" }
 
 -- Tunable parameters. HOME_MIN_SATS and the two HAPTIC values are pilot-editable
 -- (via the tool / config.lua); the rest are fixed core constants (PC edit only).
@@ -93,6 +94,8 @@ M.PARAMS = {
   UNITS           = "metric", -- display units: "metric" (m, km/h) or "imperial" (ft, mph); the radio's setting, see below
   MAX_ALT         = 0,     -- announce once above this altitude over home, 0 = off (sensor units); config: maxAlt
   MAX_ALT_HYST    = 10,    -- must drop this far below MAX_ALT before it can announce again
+  MAX_DIST        = 0,     -- announce once farther than this from home, 0 = off (m or ft per UNITS); config: maxDist
+  MAX_DIST_HYST   = 100,   -- must come this much closer than MAX_DIST before it can announce again
   DOP_POLL_T      = 1,     -- MSP request interval on the ground (s)
   DOP_STALE_T     = 3,     -- a DOP older than this is not shown (s)
   DOP_GIVE_UP_T   = 10,    -- no reply at all this long after the first request on this link: give up (s)
@@ -120,7 +123,7 @@ M.PARAMS = {
 -- playHaptic pulse length per strength tier, and pulses per event: GPS lost
 -- fires twice to feel clearly stronger than the two "good news" events.
 M.HAPTIC_DUR    = { [1] = 15, [2] = 30, [3] = 50 }
-M.HAPTIC_PULSES = { ready = 1, fix = 1, lost = 2, rec = 1, alt = 2 }
+M.HAPTIC_PULSES = { ready = 1, fix = 1, lost = 2, rec = 1, alt = 2, dist = 2 }
 
 -- Editable ranges: the SINGLE source for both the on-radio editor and the
 -- runtime clamp in normalizeConfig, so they can never drift apart.
@@ -128,6 +131,7 @@ M.LIMITS = {
   homeMinSats     = { min = 4, max = 20, step = 1 },
   hapticStrength  = { min = 1, max = 3,  step = 1 },
   maxAlt          = { min = 0, max = 500, step = 10 },
+  maxDist         = { min = 0, max = 5000, step = 100 },
 }
 
 -- Display units follow the radio's system setting (Units: metric / imperial).
@@ -158,6 +162,7 @@ M.DEFAULTS = {
   haptic         = M.PARAMS.HAPTIC,
   hapticStrength = M.PARAMS.HAPTIC_STRENGTH,
   maxAlt         = M.PARAMS.MAX_ALT,
+  maxDist        = M.PARAMS.MAX_DIST,
 }
 local DEFAULTS = M.DEFAULTS
 
@@ -420,6 +425,7 @@ function M.normalizeConfig(cfg)
                          L.hapticStrength.min, L.hapticStrength.max, DEFAULTS.hapticStrength)
   out.units          = nil   -- now the radio's setting; dropped from older configs
   out.maxAlt         = clampNum(out.maxAlt, L.maxAlt.min, L.maxAlt.max, DEFAULTS.maxAlt)
+  out.maxDist        = clampNum(out.maxDist, L.maxDist.min, L.maxDist.max, DEFAULTS.maxDist)
   local snd, sounds = (type(out.sounds) == "table") and out.sounds or {}, {}
   for k, v in pairs(snd) do sounds[k] = v end
   for _, k in ipairs(M.SOUND_KEYS) do sounds[k] = soundOr(snd[k]) end
@@ -437,6 +443,7 @@ function M.applyConfigOverrides(cfg)
   M.PARAMS.HAPTIC          = n.haptic
   M.PARAMS.HAPTIC_STRENGTH = n.hapticStrength
   M.PARAMS.MAX_ALT         = n.maxAlt
+  M.PARAMS.MAX_DIST        = n.maxDist
   for _, k in ipairs(M.SOUND_KEYS) do
     local v = n.sounds[k]
     if v == nil then v = M.SOUND_DEFAULTS[k] end
@@ -1080,6 +1087,7 @@ function M.resetFlight(state)
   state.maxAlt           = nil   -- home and ground speed (sensor units); for scripts that load
   state.maxGspd          = nil   -- the core
   state.altWarned        = false -- max-altitude announcement made, re-armed below MAX_ALT - MAX_ALT_HYST
+  state.distWarned       = false -- max-distance announcement made, re-armed below MAX_DIST - MAX_DIST_HYST
   -- last valid telemetry holds (also the frozen ENDED position)
   state.lastLat  = nil
   state.lastLon  = nil
@@ -1413,6 +1421,16 @@ function M.evaluate(state, snap, now)
         state.altWarned = false
       end
     end
+    -- Max distance: the same, in display units (ft when imperial).
+    if P.MAX_DIST > 0 and d then
+      local du = P.UNITS == "imperial" and d * 3.28084 or d
+      if not state.distWarned and du > P.MAX_DIST then
+        state.distWarned = true
+        result.distEvent = true
+      elseif state.distWarned and du < P.MAX_DIST - P.MAX_DIST_HYST then
+        state.distWarned = false
+      end
+    end
   end
 
   result.gpsState          = "HOME"
@@ -1426,6 +1444,8 @@ function M.evaluate(state, snap, now)
   result.maxDistM          = state.maxDistM
   result.maxAlt            = state.maxAlt
   result.maxGspd           = state.maxGspd
+  result.altOver           = P.MAX_ALT > 0 and state.altWarned    -- over the limit (until the hysteresis)
+  result.distOver          = P.MAX_DIST > 0 and state.distWarned
   result.fixLost           = state.fixLost   -- persistent flag: widget colours sats red
   result.alert             = snap.alert      -- "RTH" / "FS" from the FC, nil otherwise
   result.sensorMissing = snap.sensorMissing
@@ -1481,6 +1501,7 @@ function M.update(state, now)
   if result.fixLostEvent then announce("lost"); wakeDisplay() end
   if result.fixRecovered then announce("rec")  end
   if result.altEvent     then announce("alt"); wakeDisplay() end
+  if result.distEvent    then announce("dist"); wakeDisplay() end
 
   return result
 end

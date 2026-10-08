@@ -519,7 +519,7 @@ local function flightView(w, on)
     v.gps = { sats = g.sats, course = g.course, bearing = g.bearingToHome, rel = g.rel, dist = g.distanceM,
               atHome = g.atHome, gpsState = g.gpsState, noHome = g.noHome, sector = g.sector,
               courseValid = g.courseValid, estimated = g.noseEstimated, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
-              alt = g.alt }
+              alt = g.alt, altOver = g.altOver, distOver = g.distOver }
   end
   if r and r.status == "running" then v.link = linkView(w, r) end
   return v
@@ -560,8 +560,12 @@ local function recordAlerts(w, on, now)
   local L = lipoOn(w, on)
   if L and L.selectedProfile then
     local warn, crit = w.mods.lipo.getThresholds(L)
-    if L.warnPlayed and not a.warn then addAlert(w, now, "Battery " .. warn .. " %", 1) end
-    if L.critPlayed and not a.crit then addAlert(w, now, "Battery " .. crit .. " %", 2) end
+    if a.warn == nil and L.warnPlayed then
+      addAlert(w, now, "Battery not charged", 1)   -- already low when picked: no threshold was crossed
+    else
+      if L.warnPlayed and not a.warn then addAlert(w, now, "Battery " .. warn .. " %", 1) end
+      if L.critPlayed and not a.crit then addAlert(w, now, "Battery " .. crit .. " %", 2) end
+    end
     a.warn, a.crit = L.warnPlayed, L.critPlayed
   end
   local r = linkRes(w, on)
@@ -571,6 +575,7 @@ local function recordAlerts(w, on, now)
   local g = gpsRes(w, on)
   if g and g.fixLostEvent then addAlert(w, now, "GPS fix lost", 2) end
   if g and g.altEvent then addAlert(w, now, "Max altitude", 1) end
+  if g and g.distEvent then addAlert(w, now, "Max distance", 1) end
   if w.alert ~= a.alert then
     if w.alert == "FS" then addAlert(w, now, "Failsafe", 2)
     elseif w.alert == "RTH" then addAlert(w, now, "Return to home", 1) end
