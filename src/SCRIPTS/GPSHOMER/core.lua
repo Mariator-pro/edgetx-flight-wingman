@@ -1182,9 +1182,11 @@ function M.evaluate(state, snap, now)
     if state.homeSet and state.lastLat and state.lastLon then
       pcall(M.logFlight, state.lastLat, state.lastLon)
     end
-  elseif event == "lost" or event == "over" then
+  elseif event == "lost" then
     state.disarmSeen = nil   -- new flight, new proof needed
-    M.resetFlight(state)     -- lost: nothing to show; over: hold elapsed, position discarded
+    M.resetFlight(state)     -- link gone before the flight page: nothing to show
+  elseif event == "over" then
+    state.disarmSeen = nil   -- hold elapsed: the flight's values stay until the next link
   elseif event == "new" then
     M.resetFlight(state)     -- a return of telemetry is a NEW flight (FR-12)
   end

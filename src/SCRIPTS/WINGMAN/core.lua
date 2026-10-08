@@ -526,8 +526,8 @@ local function flightView(w, on)
 end
 
 -- Search view from the GPS core's own state: home, last position, link.
--- The last source is kept: the GPS core clears its position after its own end
--- hold, the search page stays until the next link.
+-- The last source is kept: a new link resets the GPS core's home, while the
+-- search page stays until it is closed or the model is armed.
 local function searchFromGps(w, now)
   local st, g = w.gps, w.gpsRes or {}
   local src = w.searchSrc
