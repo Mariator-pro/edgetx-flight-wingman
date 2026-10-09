@@ -695,14 +695,14 @@ local function packTitle(L, w, name, short)
   return cutText(string.sub(name, 1, #name - #num), num, maxW, L.f.title)
 end
 
-local function drawBattery(L, x, w, b, timerS)
+local function drawBattery(L, x, w, b, sideLabel, sideValue)
   local right = x + w
   local stage = stageOf(b.pct, b.warn, b.crit)
   local col = STAGE_COL[stage] or COLORS.accent
   local hot = b.vLevel and levelCol(b.vLevel)   -- voltage coloured as on Lipo Nanny (per-cell thresholds)
   drawTitle(L, x, packTitle(L, w, b.name, b.nameShort))
   drawHero(L, x, right, fmt("%d", b.pct), "%", col, "REMAINING",
-           timerS and "TIMER", timerS and fmtTimer(timerS))
+           sideValue and sideLabel, sideValue)
 
   drawBattBar(L, x, w, b, col)
   drawGrid(L, x, w, {
@@ -877,7 +877,14 @@ local function drawFlight(ctx)
   if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
   local L = flightLayout(z)
   local c = columns(L, z, ctx.w.on, z.h)
-  if v.batt and c[1] then drawBattery(L, c[1], c[2], v.batt, ctx.w.timerS) end
+  if v.batt and c[1] then
+    -- Side value chosen in the settings tool: Timer 1 (none while off) or Lipo Nanny's time left.
+    if ctx.w.flightTime == "timeleft" then
+      drawBattery(L, c[1], c[2], v.batt, "TIME LEFT", v.batt.timeLeft)
+    else
+      drawBattery(L, c[1], c[2], v.batt, "TIMER", ctx.w.timerS and fmtTimer(ctx.w.timerS))
+    end
+  end
   if v.gps and c[3] then drawGps(L, c[3], c[4], v.gps, ctx.w.alert, ctx) end
   if v.link and c[5] then drawLink(L, c[5], c[6], v.link, ctx.w.linkUp) end
 end

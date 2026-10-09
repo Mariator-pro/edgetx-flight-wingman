@@ -160,10 +160,11 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 
 All settings are made in **Flight Bag**, the settings tool shared by all four projects (**SYS → Tools → Flight Bag**). Thresholds, sounds and vibration belong to the single projects and work exactly as described there: [Lipo Nanny](https://github.com/Mariator-pro/edgetx-lipo-nanny/blob/main/docs/configuration.md), [Link Sentinel](https://github.com/Mariator-pro/elrs-link-sentinel#️-customizing), [GPS Homer](https://github.com/Mariator-pro/edgetx-gps-homer#️-customizing).
 
-Flight Wingman adds two settings:
+Flight Wingman adds three settings:
 
 - **Models → Show in Wingman**: switch **Battery**, **Link** and **GPS** on or off per model (default all on). A switched-off column stays empty, is left out of the ready check and frees its space for the others.
 - **Display → Mascot**: the character on the waiting page, `Quad` (default) or `Scout`.
+- **Display → Flight time**: the small value beside the battery percentage on the flight page, `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying).
 
 ---
 

@@ -518,7 +518,7 @@ local function flightView(w, on)
                cell = (L.voltage and L.cells and L.cells > 0) and L.voltage / L.cells or nil,
                vLevel = core.voltageLevel(L),   -- per-cell thresholds of the chemistry, as Lipo Nanny
                left = (cap and used) and math.max(0, cap - used) or nil, used = L.capacity, cap = cap,
-               amps = L.current }
+               amps = L.current, timeLeft = L.timeLeftStr }   -- Lipo Nanny's estimate, every 2 s
   end
   local g, r = gpsRes(w, on), linkRes(w, on)
   if g then
@@ -843,9 +843,11 @@ M.MODULES = { "lipo", "link", "gps" }
 local CONFIG_POLL = 500   -- getTime units: 5 s
 
 M.MASCOTS = { "quad", "scout" }   -- wait page character, first = default
+M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the battery %, first = default
 
 function M.defaultConfig()
-  return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1] }
+  return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1],
+           flightTime = M.FLIGHT_TIMES[1] }
 end
 
 -- Returns the config, or nil plus "parse" | "schema" (and a detail text).
@@ -862,6 +864,7 @@ function M.loadConfig()
   if type(cfg.generation) ~= "number" then cfg.generation = 0 end
   if type(cfg.models) ~= "table" then cfg.models = {} end
   if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
+  if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
   return cfg
 end
 
@@ -919,15 +922,16 @@ local function activeModel()
   return ok and type(info) == "table" and info.filename or nil
 end
 
--- Switches of the active model and the mascot, re-read every 5 s (a change in
+-- Switches of the active model, the mascot and the flight time choice, re-read every 5 s (a change in
 -- the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot.
+-- file: all on, default mascot and flight time.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
   w.onAt = now
   local cfg = M.loadConfig()
   w.on = M.modules(cfg, activeModel())
   w.mascot = cfg and cfg.mascot
+  w.flightTime = cfg and cfg.flightTime
   return w.on
 end
 
