@@ -144,7 +144,7 @@ Open **SYS → Tools → Flight Bag** and set up battery, link and GPS as descri
 
 - Plug in the battery: the preflight page shows battery, GPS and link. Pick the pack if several fit, the same way as in [Lipo Nanny](https://github.com/Mariator-pro/edgetx-lipo-nanny/blob/main/docs/usage.md). Once everything is ready, the field shows `GO` and a bar counts down 15 s to the flight page; arming switches at once.
 - Unplug the battery after the flight: the post-flight page shows flight time, used capacity, distance, each column's extremes and the flight's alerts for 30 s.
-- Landed or crashed far from home (more than 15 m)? The search page shows where the model is, with a QR code for your phone's map app.
+- Landed or crashed far from home (more than 15 m)? The search page shows where the model is, with a QR code for your phone's map app. While the link is still up, the radio beeps like a Geiger counter (higher and faster the stronger the signal), so you can walk towards the model without looking at the screen.
 
 ### Stick controls
 

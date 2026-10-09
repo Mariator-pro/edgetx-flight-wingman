@@ -801,6 +801,32 @@ local function clearQr(w)
   w.qr, w.qrUrl, w.qrJob, w.qrCode = nil, nil, nil, nil
 end
 
+-- Model finder on the search page while the link is up: the link core's RSS at
+-- 25 mW (dynamic power steps removed), smoothed (each new value counts 20 %), as
+-- a strength 0..1 over FINDER_MIN..FINDER_MAX dBm and beeps that rise in pitch
+-- and come faster with it (Geiger style). rss nil: no link, the finder rests and
+-- starts fresh; so does a change of kind (RSS at 25 mW or plain), the two scales
+-- differ by the TX power. Sets v.signal (dBm, rounded), v.strength, v.beepAt
+-- (getTime of the last beep) and v.beepGap (getTime units to the next) on the search view.
+M.FINDER_MIN, M.FINDER_MAX = -110, -40              -- dBm
+local FINDER_TONE = { 600, 1200 }                   -- Hz, weak .. strong
+local FINDER_GAP  = { 120, 10 }                     -- getTime units between beeps, weak .. strong
+local FINDER_BEEP = 30                              -- ms
+function M.updateFinder(w, v, rss, now, kind)
+  local f = w.finder
+  if not rss then w.finder = nil; return end
+  if not f or f.kind ~= kind then f = { avg = rss, kind = kind }; w.finder = f end
+  f.avg = 0.8 * f.avg + 0.2 * rss
+  local s = (f.avg - M.FINDER_MIN) / (M.FINDER_MAX - M.FINDER_MIN)
+  s = math.max(0, math.min(1, s))
+  local gap = FINDER_GAP[1] + (FINDER_GAP[2] - FINDER_GAP[1]) * s
+  if not f.beepAt or now - f.beepAt >= gap then
+    f.beepAt = now
+    if playTone then playTone(math.floor(FINDER_TONE[1] + (FINDER_TONE[2] - FINDER_TONE[1]) * s), FINDER_BEEP, 0) end
+  end
+  v.signal, v.strength, v.beepAt, v.beepGap = math.floor(f.avg + 0.5), s, f.beepAt, gap
+end
+
 -- Timer 1 of the model in seconds, nil while it is switched off.
 local function readTimer(w)
   w.timerS = nil
@@ -824,9 +850,10 @@ local function updateDemo(w, now)
     w.pre = data
     w.preStatus = M.preflightStatus(data, w.mods)
   end
-  if kind ~= "search" or not w.mods.gps then clearQr(w); return end
+  if kind ~= "search" or not w.mods.gps then clearQr(w); w.finder = nil; return end
   local v = M.searchView(w.mods.gps, data)
   updateQr(w, v)
+  M.updateFinder(w, v, data.live and data.refRssi or nil, now)
   w.search = v
 end
 
@@ -1044,6 +1071,15 @@ function M.tick(w, on)
   if w.setupError then
     w.phase, w.flight, w.pre, w.search, w.post = M.WAITING, nil, nil, nil, nil
     clearQr(w)
+  end
+  -- Finder after the setup check, so a hidden search page stays silent. Input:
+  -- RSS at 25 mW, the plain RSS without TPWR; 0 means no reading yet.
+  if not w.demo then
+    local r = w.search and w.search.live and linkRes(w, on)
+    local rss = r and r.status == "running" and (r.refRssi or r.linkRssi) or nil
+    if rss == 0 then rss = nil end
+    local kind = r and r.refRssi and "ref" or "raw"
+    if not w.search or not pcall(M.updateFinder, w, w.search, rss, now, kind) then w.finder = nil end
   end
 end
 

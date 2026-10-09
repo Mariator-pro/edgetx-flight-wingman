@@ -452,6 +452,28 @@ local function flightLayout(z)
   return L
 end
 
+-- Speaker glyph h px high, left edge x, centred on cy; accent while lit (a finder beep).
+local function drawSpeaker(x, cy, h, lit)
+  local col = lit and COLORS.accent or COLORS.muted
+  local bw, bt = math.max(2, math.floor(h * 0.25)), math.max(2, math.floor(h * 0.2))
+  local cw, ch = math.max(3, math.floor(h * 0.45)), math.floor(h * 0.45)
+  lcd.drawFilledRectangle(x, cy - bt, bw, 2 * bt, col)
+  fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col)
+  fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col)
+end
+
+-- Finder strength 0..1 as 20 segments over w.
+local FINDER_SEGS = 20
+local function drawSegBar(x, y, w, h, frac)
+  local gap = math.max(1, math.floor(h / 2))
+  local seg = (w - (FINDER_SEGS - 1) * gap) / FINDER_SEGS
+  local n = math.floor(frac * FINDER_SEGS + 0.5)
+  for i = 0, FINDER_SEGS - 1 do
+    local sx = x + math.floor(i * (seg + gap))
+    lcd.drawFilledRectangle(sx, y, math.max(1, math.floor(seg)), h, i < n and COLORS.accent or COLORS.track)
+  end
+end
+
 -- Search page (right panel and the page itself); after flightLayout for the title.
 local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local p = 2 * pad
@@ -479,66 +501,89 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   y = y + th + p
 
   -- Distance from home, direction home -> model on the same row.
-  dtext(x, y, "FROM HOME", COLORS.muted, SMLSIZE)
-  y = y + fh
   -- 800 px: DBLSIZE distance, MIDSIZE unit and direction; smaller screens one step
   -- below each, so the signal line still fits above the QR code
   local wide = ctx.zone.w >= 700
   local big, dirF = wide and DBLSIZE or MIDSIZE, wide and MIDSIZE or 0
-  local bh, mh, dh = fontH(big), fontH(MIDSIZE), fontH(dirF)
+  local bh, dh = fontH(big), fontH(dirF)
+  -- Signal, altitude and sats as one line with the finder bar below; where that
+  -- would leave too little room for the QR code, only the signal as a column
+  -- beside the distance.
+  local barH = math.max(3, math.floor(fh / 4))
+  local lineMode = bottom - (y + fh + bh + p + fh + p + barH + p) >= 3 * 33
+  -- Finder signal in dBm; without it the radio's link value in %.
+  local sigNum = v.signal and tostring(v.signal) or ((v.live and ctx.w.rssi) and string.format("%d%%", ctx.w.rssi) or "--")
+  local sigUnit = v.signal and "dBm" or ""
+  -- speaker lit 150 ms after a beep, at most half the gap so fast beeps still blink
+  local lit = v.beepAt and getTime() - v.beepAt < math.min(15, (v.beepGap or 30) / 2)
+
+  dtext(x, y, "FROM HOME", COLORS.muted, SMLSIZE)
   local num, unit = fmtDist(v.distM)
-  dtext(x, y, num, COLORS.fg, big)
-  dtext(x + textW(num, big) + pad, y + bh - dh - math.floor(bh * UNIT_DROP), unit, COLORS.muted, dirF)
   local deg = string.format("%d\194\176", math.floor(v.bearing + 0.5) % 360)
   local sec = v.sector .. " "
   local cr = math.floor(dh / 2)
   local dx = right - textW(deg, dirF) - textW(sec, dirF)
+  local gx = dx - pad - cr
+  if not lineMode then
+    -- centred in the gap between the distance and the direction; left out when
+    -- a long distance and direction leave no room
+    local left = math.max(x + textW("FROM HOME", SMLSIZE), x + textW(num, big) + pad + textW(unit, dirF)) + p
+    local room = gx - cr - p - left
+    local function colW(f) return math.max(textW("SIGNAL", SMLSIZE) + pad + fh, textW(sigNum, f) + pad + textW(sigUnit, dirF)) end
+    local nf = (colW(big) <= room) and big or dirF
+    if colW(nf) <= room then
+      local cx = left + math.floor((room - colW(nf)) / 2)
+      dtext(cx, y, "SIGNAL", COLORS.muted, SMLSIZE)
+      if v.signal then drawSpeaker(cx + textW("SIGNAL", SMLSIZE) + pad, y + math.floor(fh / 2), fh, lit) end
+      local ny = y + fh + math.floor((bh - fontH(nf)) / 2)
+      dtext(cx, ny, sigNum, v.live and COLORS.fg or COLORS.muted, nf)
+      if sigUnit ~= "" then
+        dtext(cx + textW(sigNum, nf) + pad, ny + fontH(nf) - dh - math.floor(fontH(nf) * UNIT_DROP), sigUnit, COLORS.muted, dirF)
+      end
+    end
+  end
+  y = y + fh
+  dtext(x, y, num, COLORS.fg, big)
+  dtext(x + textW(num, big) + pad, y + bh - dh - math.floor(bh * UNIT_DROP), unit, COLORS.muted, dirF)
   local dy = y + math.floor((bh - dh) / 2)
   dtext(dx, dy, sec, COLORS.fg, dirF)
   dtext(dx + textW(sec, dirF), dy, deg, COLORS.muted, dirF)
-  local gx, gy = dx - pad - cr, dy + cr
-  lcd.drawCircle(gx, gy, cr, COLORS.track)
-  drawArrow(gx, gy, cr - 2, v.bearing, v.live and COLORS.accent or COLORS.muted)
+  lcd.drawCircle(gx, dy + cr, cr, COLORS.track)
+  drawArrow(gx, dy + cr, cr - 2, v.bearing, v.live and COLORS.accent or COLORS.muted)
   y = y + bh + p
 
-  -- Signal, altitude, sats: in boxes, else as one text line, left out when the
-  -- QR code would get too small.
-  local boxH = fh + mh + p
-  local gap = pad
-  local bw = math.floor((right - x - 2 * gap) / 3)
-  local cells = {
-    { "SIGNAL", (v.live and ctx.w.rssi) and string.format("%d%%", ctx.w.rssi) or "--" },
-    { "ALT", fmt("%d m", v.alt) },
-    { "SATS", v.sats and tostring(v.sats) or "--" },
-  }
-  if bottom - (y + boxH + p) < 3 * 33 then
-    if bottom - (y + fh + p) >= 3 * 33 then
-      -- the three pairs spread evenly over the width
-      local used = 0
-      for _, c in ipairs(cells) do used = used + textW(c[1] .. " ", SMLSIZE) + textW(c[2], SMLSIZE) end
-      local spread = math.max(pad, math.floor((right - x - used) / 2))
-      local cx = x
-      for _, c in ipairs(cells) do
-        dtext(cx, y, c[1] .. " ", COLORS.muted, SMLSIZE)
-        cx = cx + textW(c[1] .. " ", SMLSIZE)
-        dtext(cx, y, c[2], v.live and COLORS.fg or COLORS.muted, SMLSIZE)
-        cx = cx + textW(c[2], SMLSIZE) + spread
-      end
-      y = y + fh + p
+  -- Without link the line and bar mean nothing: left out, their room kept so
+  -- the QR code keeps its size.
+  if lineMode and v.live then
+    -- the three pairs spread evenly over the width
+    local cells = {
+      { "SIGNAL ", v.signal and (sigNum .. " dBm") or sigNum },
+      { "ALT ", fmt("%d m", v.alt) },
+      { "SATS ", v.sats and tostring(v.sats) or "--" },
+    }
+    local used = 0
+    for _, c in ipairs(cells) do used = used + textW(c[1], SMLSIZE) + textW(c[2], SMLSIZE) end
+    local spread = math.max(pad, math.floor((right - x - used) / 2))
+    local cx = x
+    for _, c in ipairs(cells) do
+      dtext(cx, y, c[1], COLORS.muted, SMLSIZE)
+      cx = cx + textW(c[1], SMLSIZE)
+      dtext(cx, y, c[2], COLORS.fg, SMLSIZE)
+      cx = cx + textW(c[2], SMLSIZE) + spread
     end
-  else
-    for i, c in ipairs(cells) do
-      local bx = x + (i - 1) * (bw + gap)
-      fillRounded(bx, y, bw, boxH, FIELD_R, COLORS.box)
-      dtext(bx + pad, y + math.floor(p / 2), c[1], COLORS.muted, SMLSIZE)
-      dtext(bx + pad, y + math.floor(p / 2) + fh, c[2], v.live and COLORS.fg or COLORS.muted, MIDSIZE)
-    end
-    y = y + boxH + p
+    y = y + fh + p
+    -- finder bar over the width, the speaker at its right end
+    local spW = v.signal and fh or 0
+    drawSegBar(x, y, right - x - spW, barH, v.strength or 0)
+    if v.signal then drawSpeaker(right - math.floor(fh * 0.8), y + math.floor(barH / 2), fh, lit) end
+    y = y + barH + p
+  elseif lineMode then
+    y = y + fh + p + barH + p
   end
 
   -- QR code bottom left, position text beside it.
   local qr = v.qr
-  local textBlockW = textW("00.000000", SMLSIZE)
+  local textBlockW = textW("LON ", SMLSIZE) + textW("00.000000", SMLSIZE)
   if qr then
     local mods = qr.size + 2 * QR_QUIET
     local m = math.max(1, math.floor(math.min(bottom - y, right - x - p - textBlockW) / mods))
@@ -553,7 +598,8 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   else
     y = bottom - 3 * fh
   end
-  -- POSITION with live (or the age) beside it, then latitude and longitude
+  -- POSITION with live (or the age) beside it, then latitude and longitude with
+  -- LAT / LON labels, the values on one edge
   local hx = x + textW("POSITION ", SMLSIZE)
   dtext(x, y, "POSITION ", COLORS.muted, SMLSIZE)
   if v.live then
@@ -563,8 +609,11 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     if hx + textW(age, SMLSIZE) <= right then dtext(hx, y, age, WARN_COL, SMLSIZE)
     else dtext(x, y + 3 * fh, age, WARN_COL, SMLSIZE) end
   end
-  dtext(x, y + fh, string.format("%.5f", v.lat), COLORS.fg, SMLSIZE)
-  dtext(x, y + 2 * fh, string.format("%.5f", v.lon), COLORS.fg, SMLSIZE)
+  local vx = x + math.max(textW("LAT ", SMLSIZE), textW("LON ", SMLSIZE))
+  dtext(x, y + fh, "LAT ", COLORS.muted, SMLSIZE)
+  dtext(vx, y + fh, string.format("%.5f", v.lat), COLORS.fg, SMLSIZE)
+  dtext(x, y + 2 * fh, "LON ", COLORS.muted, SMLSIZE)
+  dtext(vx, y + 2 * fh, string.format("%.5f", v.lon), COLORS.fg, SMLSIZE)
 end
 
 local function drawSearch(ctx)
