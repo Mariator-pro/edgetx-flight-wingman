@@ -715,6 +715,14 @@ local function drawBattery(L, x, w, b, timerS)
   })
 end
 
+-- TX power label with the link core's DYN / MAX tag (dynamic power below the
+-- maximum / at it or fixed); none while the module did not answer.
+local function txLabel(l)
+  return l.pwrTag and ("TX POWER (" .. l.pwrTag .. ")") or "TX POWER"
+end
+
+local RESERVE_OPACITY = 9   -- lightened end of the range bar (0 opaque .. 15 invisible)
+
 local function drawLink(L, x, w, l, linkUp)
   local right = x + w
   local col = STAGE_COL[l.stage] or COLORS.accent
@@ -727,22 +735,44 @@ local function drawLink(L, x, w, l, linkUp)
   local modeCap, modeVal = modeParts(l.mode)
   drawHero(L, x, right, fmt("%d", l.range), "%", col, "RANGELIMIT", modeCap, modeVal, nil, unknown)
 
-  -- Range bar: fills towards the limit, the stage word inside.
+  -- Range bar: fills towards the limit, the stage word inside. With dynamic TX
+  -- power below the maximum the end the bar would lose at full power is lightened.
   local by, bh, r = L.y(BAR_TOP), L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
   fillRounded(x, by, w, bh, r, COLORS.track)
-  local pct = unknown and 100 or (l.range or 0)
-  local fw = math.max(2 * r, math.floor(w * math.max(0, math.min(100, pct)) / 100))
-  fillRounded(x, by, fw, bh, r, col)
+  local pct = unknown and 100 or math.max(0, math.min(100, l.range or 0))
+  local fw = math.max(2 * r, math.floor(w * pct / 100))
+  local sw = fw
+  if l.reserve and not unknown then
+    sw = math.floor(w * math.max(0, pct - l.reserve) / 100)
+    if sw < 2 * r then sw = 0 end
+  end
+  if sw > 0 then fillRounded(x, by, sw, bh, r, col) end
+  if fw > sw then
+    -- lightened end: the solid part squared off where it starts, its outer end
+    -- cut by r at the corners (translucent circles would overlap)
+    if sw > 0 then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
+    local lx, ex = math.max(x + sw, x + r), math.max(x + sw, x + fw - r)
+    if ex > lx then lcd.drawFilledRectangle(lx, by, ex - lx, bh, col, RESERVE_OPACITY) end
+    lcd.drawFilledRectangle(ex, by + r, x + fw - ex, bh - 2 * r, col, RESERVE_OPACITY)
+    if sw == 0 then lcd.drawFilledRectangle(x, by + r, r, bh - 2 * r, col, RESERVE_OPACITY) end
+  end
+  -- word dark on the solid fill (white on red), text colour on the lightened end and the track
   local word = (l.stage == 2 and "CRITICAL") or (l.stage == 1 and "WARNING") or "OK"
   local fh = fontH(L.f.stage)
   local ty = by + math.floor((bh - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5)
-  dtext(x + L.s(10), ty, word, (l.stage == 2) and WHITE or DARK_TEXT, L.f.stage)
+  local cx, onFill = x + L.s(10), (l.stage == 2) and WHITE or DARK_TEXT
+  for i = 1, #word do
+    local ch = string.sub(word, i, i)
+    local cw = textW(ch, L.f.stage)
+    dtext(cx, ty, ch, (cx + cw / 2 <= x + sw) and onFill or COLORS.fg, L.f.stage)
+    cx = cx + cw
+  end
 
   drawGrid(L, x, w, {
     { "LQ", fmt("%d %%", l.lq), l.lqStage and levelCol(l.lqStage) },
     { "RSSI dBm", l, nil, drawRssi },
     { "RSNR", fmt("%d dB", l.rsnr) },
-    { "TX POWER", fmt("%d mW", l.tpwr) },
+    { txLabel(l), fmt("%d mW", l.tpwr) },
   })
 end
 
@@ -974,7 +1004,7 @@ local function drawPreLink(L, x, w, l, st, linkUp)
   drawHero(L, x, right, fmt("%d", l.lq), "%", st.lqLevel and levelCol(st.lqLevel) or COLORS.fg, "LQ", modeCap, modeVal)
   local half = math.floor(w / 2)
   drawCell(L, x, PRE_ROW0, "RSSI dBm", l, nil, drawRssi)
-  drawCell(L, x + half, PRE_ROW0, "TX POWER", fmt("%d mW", l.tpwr))
+  drawCell(L, x + half, PRE_ROW0, txLabel(l), fmt("%d mW", l.tpwr))
   drawStatus(L, x, st.link)
 end
 

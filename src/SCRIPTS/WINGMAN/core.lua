@@ -162,6 +162,8 @@ local function pollFrames(w, on)
     if on.link and w.link then w.mods.link.handleFrame(w.link, cmd, data) end
     if on.gps and w.gps then w.mods.gps.handleFrame(w.gps, cmd, data) end
   end
+  -- link core: module ping and the Max Power / Dynamic read after a new link
+  if on.link and w.link then w.mods.link.pollModule(w.link) end
 end
 
 -- Flight mode text for display: without the disarm marker (Betaflight "*", "!",
@@ -489,6 +491,8 @@ local function linkView(w, r)
            mode = r.modeName, rssi = r.linkRssi, tpwr = snap.tpwr, ant = snap.ant, range = r.rangePct,
            -- both antennas only from a dual-antenna receiver (2RSS 0: single antenna)
            rss1 = dual and snap.rss1 or nil, rss2 = dual and snap.rss2 or nil, rsnr = snap.rsnr,
+           -- "DYN" / "MAX" beside TX POWER, DYN: the range bar's lightened end in %
+           pwrTag = r.pwrTag, reserve = r.pwrReservePct,
            lqStage = (lqLevel and snap.rqly) and lqLevel(snap.rqly) or nil }
 end
 
