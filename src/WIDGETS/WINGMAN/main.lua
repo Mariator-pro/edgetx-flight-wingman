@@ -20,14 +20,27 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Palettes (same as Link Sentinel). Set per frame from the Theme option.
+-- Colours that get mixed by hand are kept as { r, g, b } in rgb, the lcd colour
+-- is made from them.
 -- ---------------------------------------------------------------------------
+local function rgb(c) return lcd.RGB(c[1], c[2], c[3]) end
+
+-- a mixed towards b by t (0..1), as an lcd colour.
+local function mixRGB(a, b, t)
+  local function m(i) return math.floor(a[i] + (b[i] - a[i]) * t + 0.5) end
+  return lcd.RGB(m(1), m(2), m(3))
+end
+
+local DARK_RGB  = { panel = { 18, 20, 18 }, track = { 55, 58, 55 }, accent = { 124, 210, 48 } }
+local LIGHT_RGB = { track = { 200, 200, 205 }, accent = { 1, 152, 8 } }
 local DARK = {
   transparent = false,
-  panel  = lcd.RGB( 18,  20,  18),
+  panel  = rgb(DARK_RGB.panel),
   fg     = lcd.RGB(235, 235, 235),
   muted  = lcd.RGB(150, 150, 150),
-  track  = lcd.RGB( 55,  58,  55),
-  accent = lcd.RGB(124, 210,  48),
+  track  = rgb(DARK_RGB.track),
+  accent = rgb(DARK_RGB.accent),
+  rgb    = DARK_RGB,
   disk   = lcd.RGB( 22,  25,  22),   -- map background
   trail  = lcd.RGB( 60,  96,  30),   -- flight track, accent at 40 %
   box    = lcd.RGB( 27,  30,  27),
@@ -39,8 +52,9 @@ local LIGHT = {
   transparent = true,
   fg     = lcd.RGB(  0,   0,   0),
   muted  = lcd.RGB( 90,  90,  90),
-  track  = lcd.RGB(200, 200, 205),
-  accent = lcd.RGB(  1, 152,   8),
+  track  = rgb(LIGHT_RGB.track),
+  accent = rgb(LIGHT_RGB.accent),
+  rgb    = LIGHT_RGB,
   trail  = lcd.RGB(130, 200, 120),
   box    = lcd.RGB(200, 200, 205),
   halo   = lcd.RGB(245, 190, 190),
@@ -48,8 +62,8 @@ local LIGHT = {
   eyeRing = lcd.RGB( 90,  90,  90),  -- white eyes need an outline on the light head
   disc   = lcd.RGB(195, 228, 175),   -- spinning props
 }
-local WARN_COL = lcd.RGB(255, 180,   0)
-local CRIT_COL = lcd.RGB(220,  40,  40)
+local WARN_RGB, CRIT_RGB = { 255, 180, 0 }, { 220, 40, 40 }
+local WARN_COL, CRIT_COL = rgb(WARN_RGB), rgb(CRIT_RGB)
 
 local COLORS = DARK
 
@@ -151,8 +165,7 @@ local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", 
 -- from the background to red) while telemetry packets arrive. drawFilledCircle has
 -- no opacity, so the colour is mixed by hand; Light mixes from white.
 local HEARTBEAT_PERIOD = 200   -- getTime ticks
-local HEARTBEAT_RED    = { 220, 40, 40 }
-local HEARTBEAT_BG     = { dark = { 18, 20, 18 }, light = { 255, 255, 255 } }
+local HEARTBEAT_BG     = { dark = DARK_RGB.panel, light = { 255, 255, 255 } }
 local HEARTBEAT_R      = math.floor(4 * UI_SCALE + 0.5)
 
 -- floor (0..1): share of red kept at the low point (antenna tip: never gone);
@@ -161,8 +174,7 @@ local function drawHeartbeat(cx, cy, r, floor, fixed)
   floor = floor or 0
   local t  = fixed or (floor + (1 - floor) * (0.5 - 0.5 * math.cos(2 * math.pi * (getTime() % HEARTBEAT_PERIOD) / HEARTBEAT_PERIOD)))
   local bg = COLORS.transparent and HEARTBEAT_BG.light or HEARTBEAT_BG.dark
-  local function mix(i) return math.floor(bg[i] + (HEARTBEAT_RED[i] - bg[i]) * t + 0.5) end
-  lcd.drawFilledCircle(cx, cy, r or HEARTBEAT_R, lcd.RGB(mix(1), mix(2), mix(3)))
+  lcd.drawFilledCircle(cx, cy, r or HEARTBEAT_R, mixRGB(bg, CRIT_RGB, t))
 end
 
 -- No rounded rectangle in the Lua API: two overlapping bars plus four corner circles.
@@ -173,6 +185,20 @@ local function fillRounded(x, y, w, h, r, color)
                        { x + r, y + h - r - 1 }, { x + w - r - 1, y + h - r - 1 } }) do
     lcd.drawFilledCircle(c[1], c[2], r, color)
   end
+end
+
+-- Bar fill of width w in a track with corner radius r. Two radii or wider:
+-- rounded like the track. Narrower: the track's left rounding cut off at w, one
+-- 1 px column each (as if the track clipped it), straight on the right; 0 draws
+-- nothing. Returns true when the right end is rounded.
+local function fillBar(x, y, w, h, r, color)
+  if w >= 2 * r then fillRounded(x, y, w, h, r, color); return true end
+  for i = 0, w - 1 do
+    local d = r - i   -- column distance from the corner circle's centre
+    local inset = (d > 0) and math.floor(r - math.sqrt(r * r - d * d) + 0.5) or 0
+    lcd.drawFilledRectangle(x + i, y + inset, 1, h - 2 * inset, color)
+  end
+  return false
 end
 
 -- Bottom right of the page (countdowns, stick holds): a bar filled to frac
@@ -716,7 +742,7 @@ local function drawBattBar(L, x, w, b, col)
   local by, bh, r = L.y(BAR_TOP), L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
   fillRounded(x, by, w, bh, r, COLORS.track)
   local fw = math.floor(w * math.max(0, math.min(100, b.pct or 0)) / 100)
-  if fw >= 2 * r then fillRounded(x, by, fw, bh, r, col) end
+  fillBar(x, by, fw, bh, r, col)
   local t = L.s(4)
   for _, m in ipairs({ { b.warn, WARN_COL, "WARN", L.y(BAR_TOP - 7) }, { b.crit, CRIT_COL, "CRIT", L.y(BAR_BOTTOM + 20) } }) do
     local mx = x + math.floor(w * m[1] / 100)
@@ -770,7 +796,13 @@ local function txLabel(l)
   return l.pwrTag and ("TX POWER (" .. l.pwrTag .. ")") or "TX POWER"
 end
 
-local RESERVE_OPACITY = 9   -- lightened end of the range bar (0 opaque .. 15 invisible)
+-- Lightened end of the range bar: the stage colour mixed with the track, drawn
+-- opaque so it can have round corners (translucent circles would overlap).
+local RESERVE_TRACK = 0.6   -- share of the track in the mix
+local STAGE_RGB = { [1] = WARN_RGB, [2] = CRIT_RGB }
+local function reserveColor(stage)
+  return mixRGB(STAGE_RGB[stage] or COLORS.rgb.accent, COLORS.rgb.track, RESERVE_TRACK)
+end
 
 local function drawLink(L, x, w, l, linkUp)
   local right = x + w
@@ -789,21 +821,12 @@ local function drawLink(L, x, w, l, linkUp)
   local by, bh, r = L.y(BAR_TOP), L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
   fillRounded(x, by, w, bh, r, COLORS.track)
   local pct = unknown and 100 or math.max(0, math.min(100, l.range or 0))
-  local fw = math.max(2 * r, math.floor(w * pct / 100))
-  local sw = fw
-  if l.reserve and not unknown then
-    sw = math.floor(w * math.max(0, pct - l.reserve) / 100)
-    if sw < 2 * r then sw = 0 end
-  end
-  if sw > 0 then fillRounded(x, by, sw, bh, r, col) end
-  if fw > sw then
-    -- lightened end: the solid part squared off where it starts, its outer end
-    -- cut by r at the corners (translucent circles would overlap)
-    if sw > 0 then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
-    local lx, ex = math.max(x + sw, x + r), math.max(x + sw, x + fw - r)
-    if ex > lx then lcd.drawFilledRectangle(lx, by, ex - lx, bh, col, RESERVE_OPACITY) end
-    lcd.drawFilledRectangle(ex, by + r, x + fw - ex, bh - 2 * r, col, RESERVE_OPACITY)
-    if sw == 0 then lcd.drawFilledRectangle(x, by + r, r, bh - 2 * r, col, RESERVE_OPACITY) end
+  local fw = math.floor(w * pct / 100)
+  local sw = (l.reserve and not unknown) and math.floor(w * math.max(0, pct - l.reserve) / 100) or fw
+  -- lightened end under the solid part, which is squared off where it ends
+  if fw > sw then fillBar(x, by, fw, bh, r, reserveColor(l.stage)) end
+  if sw > 0 then
+    if fillBar(x, by, sw, bh, r, col) and fw > sw then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
   end
   -- word dark on the solid fill (white on red), text colour on the lightened end and the track
   local word = (l.stage == 2 and "CRITICAL") or (l.stage == 1 and "WARNING") or "OK"
@@ -1137,7 +1160,7 @@ end
 -- ---------------------------------------------------------------------------
 local POST_KPI_H  = 100   -- key figure strip (design px of the 418 body)
 local POST_COLS_B = 306   -- columns end here
-local POST_ROW0, POST_ROW_H = 54, 30   -- first value row (offset in the column), pitch
+local POST_ROW0, POST_ROW_H = 62, 30   -- first value row (offset in the column), pitch
 local ALERT_ROW_H = 24
 
 local function kmText(m) return m and string.format("%.1f", m / 1000) or "--" end

@@ -46,7 +46,6 @@ CHANGELOG.md
 
 # GPS Homer flight log (runtime data in the copy synced from edgetx-gps-homer)
 src/SCRIPTS/GPSHOMER/flights.lua
-src/SCRIPTS/GPSHOMER/sim.lua
 
 # Wingman test data for the simulator
 src/SCRIPTS/WINGMAN/demo.lua

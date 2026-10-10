@@ -62,9 +62,6 @@ M.SENSORS = {
 -- Absolute path bypasses EdgeTX's per-language resolution so the pilot's own
 -- voice plays regardless of locale.
 
--- Simulator switch: true replaces all telemetry reads with the scripted flight
--- in sim.lua (Companion cannot feed GPS/GSpd/Hdg). Must be false for flying.
-M.SIMULATE  = false
 M.COMPASS_PATH = "/SCRIPTS/GPSHOMER/compass.lua"   -- compass drawing for the widgets
 M.SOUND_DIR = "/SOUNDS/en/SCRIPTS/GPSHOMER/"
 M.SOUNDS = {
@@ -1036,15 +1033,6 @@ function M.readSnapshot(state, now)
     fix           = fix,   -- "NONE" / "2D" / "3D" from the same source as the DOP
     sensorMissing = sensorMissing,
   }
-end
-
--- SIMULATE: sim.lua returns a replacement readSnapshot that plays a scripted
--- flight, so every value the core consumes comes from the script.
-if M.SIMULATE then
-  pcall(function()
-    local chunk = loadScript and loadScript("/SCRIPTS/GPSHOMER/sim.lua")
-    if chunk then M.readSnapshot = chunk()(M) end
-  end)
 end
 
 -- ---------------------------------------------------------------------------
