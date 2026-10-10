@@ -864,6 +864,141 @@ local function drawCompass(L, cx, cy, g, kind, course, rel)
   compass.draw(cx, cy, R, { course = course, rel = rel, bearing = g.bearing }, NORTH_UP, false, col)
 end
 
+-- ---------------------------------------------------------------------------
+-- Artificial horizon (GPS view "Horizon"): a heading band with the nose mark and
+-- a house towards home, below it the horizon from the GPS core's pitch and roll
+-- with heading, roll and pitch as numbers. Design y in the 418 px body.
+-- ---------------------------------------------------------------------------
+-- Constants and helpers in one table: the main chunk is near Lua's 200 locals.
+local HZ = {
+  BAND_Y = 156, TOP = 194, BOTTOM = 318,   -- band letter baseline, horizon box
+  LABEL_Y = 344,  -- home line baseline below the horizon (308 under the compass)
+  SPAN = 60,      -- band: degrees either side of the nose
+  PPD  = 2.2,     -- horizon: design px per degree of pitch
+  GPS_W = 240,    -- GPS column in the 800 px design with the horizon (wider band and horizon)
+  SKY = lcd.RGB(47, 110, 168), GROUND = lcd.RGB(122, 82, 48),
+  PILL = lcd.RGB(18, 20, 18), PILL_OPACITY = 4,   -- dark backing for numbers on sky or ground
+  WHITE = lcd.RGB(255, 255, 255),
+  NAMES = { [0] = "N", [45] = "NE", [90] = "E", [135] = "SE", [180] = "S", [225] = "SW", [270] = "W", [315] = "NW" },
+}
+
+-- Heading band over w: letters every 45 deg and ticks between, moving with the
+-- course; the nose mark in the middle, the house at rel (held at the edge beyond
+-- SPAN). No course: line and nose mark only.
+function HZ.band(L, x, w, course, rel)
+  local mid, base, f = x + math.floor(w / 2), L.y(HZ.BAND_Y), L.f.cap
+  local lineY, ppd = base + L.s(10), w / (2 * HZ.SPAN)
+  lcd.drawFilledRectangle(x, lineY, w, L.s(2), COLORS.track)
+  if course then
+    for k = math.ceil((course - HZ.SPAN) / 22.5), math.floor((course + HZ.SPAN) / 22.5) do
+      local px = mid + math.floor((k * 22.5 - course) * ppd + 0.5)
+      if k % 2 == 0 then
+        local name = HZ.NAMES[(k * 45 / 2) % 360]
+        local tw = textW(name, f)
+        if px - tw / 2 >= x and px + tw / 2 <= x + w then
+          btext(px - math.floor(tw / 2), base, name, name == "N" and COLORS.fg or COLORS.muted, f)
+        end
+      else
+        lcd.drawFilledRectangle(px - 1, base - L.s(12), L.s(2), L.s(10), COLORS.muted)
+      end
+    end
+  end
+  local t = L.s(6)
+  fillTri(mid - t, lineY - L.s(5), mid + t, lineY - L.s(5), mid, lineY + L.s(2), COLORS.fg)
+  if rel then
+    local hs = L.s(10)
+    local hx = mid + math.floor(math.max(-HZ.SPAN, math.min(HZ.SPAN, rel)) * ppd + 0.5)
+    hx = math.max(x + hs, math.min(x + w - hs, hx))
+    local y0 = lineY + L.s(4)
+    fillTri(hx, y0, hx - hs, y0 + hs, hx + hs, y0 + hs, WARN_COL)
+    local bw = math.floor(hs * 1.2)
+    lcd.drawFilledRectangle(hx - math.floor(bw / 2), y0 + hs, bw, math.floor(hs * 0.8), WARN_COL)
+  end
+end
+
+-- Polygon (list of {x, y}) cut to the side where (q - p) . n >= 0. Returns the
+-- polygon and the cut points (the horizon line's ends inside the box).
+function HZ.clip(poly, px, py, nx, ny)
+  local out, cut = {}, {}
+  for i = 1, #poly do
+    local a, b = poly[i], poly[i % #poly + 1]
+    local da = (a[1] - px) * nx + (a[2] - py) * ny
+    local db = (b[1] - px) * nx + (b[2] - py) * ny
+    if da >= 0 then out[#out + 1] = a end
+    if (da >= 0) ~= (db >= 0) then
+      local t = da / (da - db)
+      local q = { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t }
+      out[#out + 1], cut[#cut + 1] = q, q
+    end
+  end
+  return out, cut
+end
+
+-- Number on a dark backing, centred on cx with its top at y.
+function HZ.pill(L, cx, y, text, col)
+  local f, pad = L.f.cap, L.s(5)
+  local tw = textW(text, f)
+  lcd.drawFilledRectangle(cx - math.floor(tw / 2) - pad, y, tw + 2 * pad, fontH(f), HZ.PILL, HZ.PILL_OPACITY)
+  dtext(cx - math.floor(tw / 2), y, text, col, f)
+end
+
+-- Horizon in the box x, y, w, h: sky, ground cut along the horizon (rolled by
+-- roll, moved down by pitch), pitch lines at 10 and 20 deg, the fixed aircraft
+-- symbol and roll / pitch as numbers (the last values: how fresh depends on the
+-- telemetry ratio). Without attitude sensors a hint instead.
+function HZ.attitude(L, x, y, w, h, g)
+  local cx, cy = x + math.floor(w / 2), y + math.floor(h / 2)
+  local roll, pitch, rr = g.roll, g.pitch, L.s(4)   -- corner radius as the battery and link bars
+  if not (roll and pitch) then
+    fillRounded(x, y, w, h, rr, COLORS.track)
+    local f = L.f.value
+    dtext(cx - math.floor(textW("NO ATTITUDE", f) / 2), cy - math.floor(fontH(f) / 2), "NO ATTITUDE", COLORS.muted, f)
+    return
+  end
+  local a, ppd = math.rad(roll), HZ.PPD * L.k
+  local dx, dy = math.cos(a), -math.sin(a)   -- along the horizon (right side up in a right bank)
+  local nx, ny = -dy, dx                      -- towards the ground
+  local function r(v) return math.floor(v + 0.5) end
+  fillRounded(x, y, w, h, rr, HZ.SKY)
+  -- Ground cut to the box with chamfered corners (within a px of the rounding), one px
+  -- short on the right and bottom so the two-px horizon line stays inside.
+  local x2, y2 = x + w - 2, y + h - 2
+  local ground, cut = HZ.clip({ { x + rr, y }, { x2 - rr, y }, { x2, y + rr }, { x2, y2 - rr },
+                                { x2 - rr, y2 }, { x + rr, y2 }, { x, y2 - rr }, { x, y + rr } },
+                              cx + nx * pitch * ppd, cy + ny * pitch * ppd, nx, ny)
+  for i = 2, #ground - 1 do
+    fillTri(r(ground[1][1]), r(ground[1][2]), r(ground[i][1]), r(ground[i][2]), r(ground[i + 1][1]), r(ground[i + 1][2]), HZ.GROUND)
+  end
+  if #cut == 2 then thickLine(r(cut[1][1]), r(cut[1][2]), r(cut[2][1]), r(cut[2][2]), HZ.WHITE) end
+  for _, d in ipairs({ -20, -10, 10, 20 }) do
+    local qx, qy = cx + nx * (pitch - d) * ppd, cy + ny * (pitch - d) * ppd
+    local hw = L.s(math.abs(d) == 10 and 12 or 20)
+    local x1, y1, x2, y2 = r(qx - dx * hw), r(qy - dy * hw), r(qx + dx * hw), r(qy + dy * hw)
+    if math.min(x1, x2) > x and math.max(x1, x2) < x + w and math.min(y1, y2) > y and math.max(y1, y2) < y + h then
+      lcd.drawLine(x1, y1, x2, y2, SOLID, HZ.WHITE)
+    end
+  end
+  local t, wing, gap = L.s(3), L.s(34), L.s(12)
+  lcd.drawFilledRectangle(cx - wing, cy - 1, wing - gap, t, WARN_COL)
+  lcd.drawFilledRectangle(cx + gap, cy - 1, wing - gap, t, WARN_COL)
+  lcd.drawFilledRectangle(cx - gap - 1, cy - 1, t, L.s(8), WARN_COL)
+  lcd.drawFilledRectangle(cx + gap - t + 1, cy - 1, t, L.s(8), WARN_COL)
+  lcd.drawFilledCircle(cx, cy, L.s(3), WARN_COL)
+  -- roll at the left edge on the symbol's height, pitch at the bottom, clear of the middle
+  local fh = fontH(L.f.cap)
+  HZ.pill(L, x + L.s(10) + math.floor(textW("-90\194\176", L.f.cap) / 2), cy - math.floor(fh / 2),
+          string.format("%d\194\176", r(roll)), WARN_COL)
+  HZ.pill(L, cx, y + h - fh - L.s(5), string.format("%+d\194\176", r(pitch)), WARN_COL)
+end
+
+function HZ.draw(L, x, w, g, course, rel)
+  HZ.band(L, x, w, course, rel)
+  local top, h = L.y(HZ.TOP), L.y(HZ.BOTTOM) - L.y(HZ.TOP)
+  HZ.attitude(L, x, top, w, h, g)
+  HZ.pill(L, x + math.floor(w / 2), top + L.s(5),
+          course and string.format("%d\194\176", math.floor(course + 0.5) % 360) or "--", HZ.WHITE)
+end
+
 -- Satellites as the big value, five bars on the right (stages as GPS Homer).
 local function drawSats(L, x, right, sats)
   local n = satBars(sats)
@@ -893,8 +1028,13 @@ local function drawGps(L, x, w, g, alert, ctx)
                                      courseValid = g.courseValid, estimated = g.estimated, rel = sm.rel,
                                      sector = g.sector, bearing = g.bearing },
                                    { ahead = g.ahead or 15, behind = g.behind or 165 })
-    local cx, base = x + math.floor(w / 2), L.y(308)
-    drawCompass(L, cx, L.y(208), g, kind, sm.course, sm.rel)
+    local horizon = ctx.w and ctx.w.gpsView == "horizon"
+    local cx, base = x + math.floor(w / 2), L.y(horizon and HZ.LABEL_Y or 308)
+    if horizon then
+      HZ.draw(L, x, w, g, sm.course, kind == "arrow" and sm.rel or nil)
+    else
+      drawCompass(L, cx, L.y(208), g, kind, sm.course, sm.rel)
+    end
     local col = (lb.col == "warn" and WARN_COL) or (lb.col == "crit" and CRIT_COL)
                 or (lb.col == "muted" and COLORS.muted) or COLORS.fg
     if lb.cap then
@@ -919,7 +1059,7 @@ end
 -- module switched off frees its column and the others share the width equally.
 -- Returns x, w of battery (1, 2), GPS (3, 4) and link (5, 6), nil when off.
 local COL_MODULES = { "lipo", "gps", "link" }
-local function columns(L, z, on, bottom, top)
+local function columns(L, z, on, bottom, top, gpsW)
   top = top or HDR_H
   on = on or {}
   local shown = {}
@@ -927,7 +1067,7 @@ local function columns(L, z, on, bottom, top)
   local n = #shown
   local edges = { 0 }
   if n == 3 then
-    local sideW = math.floor((z.w - L.x(GPS_W)) / 2)
+    local sideW = math.floor((z.w - L.x(gpsW or GPS_W)) / 2)
     edges = { 0, sideW, z.w - sideW }
   else
     for j = 2, n do edges[j] = math.floor((j - 1) * z.w / n) end
@@ -948,7 +1088,7 @@ local function drawFlight(ctx)
   local z = ctx.zone
   if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
   local L = flightLayout(z)
-  local c = columns(L, z, ctx.w.on, z.h)
+  local c = columns(L, z, ctx.w.on, z.h, nil, ctx.w.gpsView == "horizon" and HZ.GPS_W or nil)
   if v.batt and c[1] then
     -- Side value chosen in the settings tool: Timer 1 (none while off) or Lipo Nanny's time left.
     if ctx.w.flightTime == "timeleft" then

@@ -526,7 +526,8 @@ local function flightView(w, on)
     v.gps = { sats = g.sats, course = g.course, bearing = g.bearingToHome, rel = g.rel, dist = g.distanceM,
               atHome = g.atHome, gpsState = g.gpsState, noHome = g.noHome, sector = g.sector,
               courseValid = g.courseValid, estimated = g.noseEstimated, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
-              alt = g.alt, altOver = g.altOver, distOver = g.distOver }
+              alt = g.alt, altOver = g.altOver, distOver = g.distOver,
+              pitch = g.pitch, roll = g.roll }   -- attitude for the horizon
   end
   if r and r.status == "running" then v.link = linkView(w, r) end
   return v
@@ -871,10 +872,11 @@ local CONFIG_POLL = 500   -- getTime units: 5 s
 
 M.MASCOTS = { "quad", "scout" }   -- wait page character, first = default
 M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the battery %, first = default
+M.GPS_VIEWS = { "compass", "horizon" }      -- flight page GPS column, first = default
 
 function M.defaultConfig()
   return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1],
-           flightTime = M.FLIGHT_TIMES[1] }
+           flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1] }
 end
 
 -- Returns the config, or nil plus "parse" | "schema" (and a detail text).
@@ -892,6 +894,7 @@ function M.loadConfig()
   if type(cfg.models) ~= "table" then cfg.models = {} end
   if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
   if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
+  if cfg.gpsView ~= M.GPS_VIEWS[2] then cfg.gpsView = M.GPS_VIEWS[1] end
   return cfg
 end
 
@@ -949,9 +952,9 @@ local function activeModel()
   return ok and type(info) == "table" and info.filename or nil
 end
 
--- Switches of the active model, the mascot and the flight time choice, re-read every 5 s (a change in
--- the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot and flight time.
+-- Switches of the active model, the mascot, the flight time and GPS view choice, re-read every 5 s (a
+-- change in the settings tool or a model switch applies without a reload). A damaged
+-- file: all on, default mascot, flight time and GPS view.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
   w.onAt = now
@@ -959,6 +962,7 @@ local function pollModules(w, now)
   w.on = M.modules(cfg, activeModel())
   w.mascot = cfg and cfg.mascot
   w.flightTime = cfg and cfg.flightTime
+  w.gpsView = cfg and cfg.gpsView
   return w.on
 end
 

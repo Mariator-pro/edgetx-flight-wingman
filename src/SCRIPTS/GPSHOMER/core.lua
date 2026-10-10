@@ -55,6 +55,7 @@ M.SENSORS = {
   fm   = "FM",     -- flight mode text; carries the armed state (optional)
   yaw  = "Yaw",    -- nose direction from the FC attitude (CRSF only, optional)
   roll = "Roll",
+  pitch = "Ptch",  -- attitude for an artificial horizon (CRSF only, optional)
 }
 
 -- Event sounds. Folder fixed (folder upper, files lower, as in the repo);
@@ -981,11 +982,13 @@ function M.readSnapshot(state, now)
   local rawAlt  = readPresent(has, S, "galt")
   if rawAlt == nil then rawAlt = readPresent(has, S, "alt") end
   local alt     = M.validRange(rawAlt, -500, 10000)
-  -- Attitude in rad (-pi..pi; older firmware 0..2pi) -> yaw 0..360, roll -180..180.
+  -- Attitude in rad (-pi..pi; older firmware 0..2pi) -> yaw 0..360, roll and pitch -180..180.
   local yaw     = M.validRange(readPresent(has, S, "yaw"), -7, 7)
   local roll    = M.validRange(readPresent(has, S, "roll"), -7, 7)
-  yaw  = yaw and (math.deg(yaw) % 360)
-  roll = roll and (math.deg(roll) + 540) % 360 - 180
+  local pitch   = M.validRange(readPresent(has, S, "pitch"), -7, 7)
+  yaw   = yaw and (math.deg(yaw) % 360)
+  roll  = roll and (math.deg(roll) + 540) % 360 - 180
+  pitch = pitch and (math.deg(pitch) + 540) % 360 - 180
 
   local telem = linkUp()
 
@@ -996,6 +999,13 @@ function M.readSnapshot(state, now)
 
   local fm = readPresent(has, S, "fm")
   local armed, armedKnown = armedFromFM(state, fm)
+
+  -- Pitch nose up positive. Betaflight and INAV send nose down positive, ArduPilot
+  -- nose up; the firmware from the first FM text that tells, unknown counts as Betaflight.
+  if pitch then
+    state.attFc = state.attFc or state.fcKind or M.fcFromFM(fm)
+    if state.attFc ~= "AP" then pitch = -pitch end
+  end
 
   -- DOP only for a caller that asked for it (the widget) and only on the ground
   -- before the first flight: after a landing ALT and DIST stay (finding the
@@ -1022,6 +1032,7 @@ function M.readSnapshot(state, now)
     alt           = alt,
     yaw           = yaw,
     roll          = roll,
+    pitch         = pitch,
     armed         = armed,
     armedKnown    = armedKnown,
     fmText        = type(fm) == "string" and fm ~= "",   -- any FM text this sample
@@ -1102,6 +1113,7 @@ local function resetMsp(state)
   state.dopAnswered = false     -- any reply on this link
   state.dopGaveUp   = false     -- no more requests on this link
   state.fcKind      = nil       -- "BF" / "INAV" / "AP" once the FM text or a passthrough frame told
+  state.attFc       = nil       -- the same for the pitch sign, also without MSP
 end
 
 function M.newState()
@@ -1166,6 +1178,9 @@ function M.evaluate(state, snap, now)
   if snap.alt  then state.lastAlt  = snap.alt  end
   if snap.yaw  then state.lastYaw  = snap.yaw  end
   if snap.roll then state.lastRoll = snap.roll end
+  -- Attitude for an artificial horizon, the last values (kept across flights).
+  state.attRoll, state.attPitch = snap.roll or state.attRoll, snap.pitch or state.attPitch
+  result.roll, result.pitch = state.attRoll, state.attPitch
 
   -- Flight phase from the link, the armed state and the last tick's preflight
   -- check. A new flight (also after the end hold) starts from a clean state.

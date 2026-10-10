@@ -25,6 +25,9 @@ return function(core)
       { key = "flightTime", page = "display", label = "Flight time", type = "choice",
         choices = core.FLIGHT_TIMES, labels = { "EdgeTX Timer 1", "Remaining Timer" }, default = core.FLIGHT_TIMES[1],
         hint = "Time shown beside the battery % in flight" },
+      { key = "gpsView", page = "display", label = "GPS view", type = "choice",
+        choices = core.GPS_VIEWS, labels = { "Compass", "Horizon" }, default = core.GPS_VIEWS[1],
+        hint = "Horizon: set Telem Ratio to 1:4 or faster" },
     },
   }
 end
