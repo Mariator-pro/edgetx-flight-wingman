@@ -47,9 +47,16 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 
 Three widgets side by side share a small screen, yet each phase of a flight needs different values. Flight Wingman sorts by phase instead of by topic: before take-off it answers *"Am I ready to go?"*, in flight *"Do I have to react now?"*, after landing *"Did everything go well?"* and after a crash *"Where is the model?"*.
 
-<p align="center">
-  <img src="docs/img/widget-flight.png" width="480" alt="Flight Wingman flight page with battery, GPS and link columns">
-</p>
+<table>
+  <tr>
+    <td align="center"><img src="docs/img/widget-flight.png" width="400" alt="Flight Wingman flight page with battery, GPS and link columns and the compass"></td>
+    <td align="center"><img src="docs/img/widget-flight-horizon.png" width="400" alt="Flight Wingman flight page with a large artificial horizon, speed and altitude tapes, battery and link at the sides"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Flight, compass</b><br>three columns with the home arrow</td>
+    <td align="center"><b>Flight, horizon</b><br>large artificial horizon (Flight Bag: GPS view)</td>
+  </tr>
+</table>
 
 - **One screen, three columns:** battery from Lipo Nanny, home arrow from GPS Homer, link from Link Sentinel, each with the same colors and thresholds as the single widget.
 - **Pages switch on their own**, no button needed: waiting, preflight, flight, post-flight and search.
@@ -58,7 +65,7 @@ Three widgets side by side share a small screen, yet each phase of a flight need
 - **Setup errors show up before you fly:** a missing core, an unconfigured model or a missing sensor keeps the waiting page with a hint, instead of warnings silently not playing.
 - **Not every model has GPS:** battery, link and GPS can be switched off per model; the remaining columns share the width.
 
-Besides the flight view above, the widget shows a page for each other phase of a flight:
+Besides the two flight views above, the widget shows a page for each other phase of a flight:
 
 <table>
   <tr>
@@ -165,7 +172,7 @@ Flight Wingman adds four settings:
 - **Models → Show in Wingman**: switch **Battery**, **Link** and **GPS** on or off per model (default all on). A switched-off column stays empty, is left out of the ready check and frees its space for the others.
 - **Display → Mascot**: the character on the waiting page, `Quad` (default) or `Scout`.
 - **Display → Flight time**: the small value beside the battery percentage on the flight page, `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying).
-- **Display → GPS view**: what the GPS column of the flight page shows, `Compass` (default) or `Horizon`: an artificial horizon from the flight controller's pitch and roll, with roll and pitch as numbers, the heading on a band above it and a house on the band towards home. The GPS column gets a little wider for it. The horizon shows the last pitch and roll that arrived, so it follows the model only with a fast telemetry ratio: set **Telem Ratio** in the ExpressLRS Lua script to 1:4 or faster (with `Std` it moves only every few seconds). Without pitch and roll sensors it shows `NO ATTITUDE`.
+- **Display → GPS view**: the layout of the flight page, `Compass` (default, three columns with the compass in the middle) or `Horizon`: battery, satellites and link at the top (battery and link with a vertical bar at the screen edge), below the battery and link values at the sides and in the middle a large artificial horizon from the flight controller's pitch and roll, with the heading on a band at its top (a house towards home), speed (SPD, left) and altitude (ALT, right) tapes (with the vertical speed as a bar and a number at the altitude, when the flight controller sends `VSpd`), roll and pitch as numbers at the aircraft symbol and the home direction with the distance at its bottom. The horizon shows the last pitch and roll that arrived, so it follows the model only with a fast telemetry ratio: set **Telem Ratio** in the ExpressLRS Lua script to 1:4 or faster (with `Std` it moves only every few seconds). Without pitch and roll sensors it shows `NO ATTITUDE`.
 
 ---
 

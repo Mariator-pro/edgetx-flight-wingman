@@ -56,6 +56,7 @@ M.SENSORS = {
   yaw  = "Yaw",    -- nose direction from the FC attitude (CRSF only, optional)
   roll = "Roll",
   pitch = "Ptch",  -- attitude for an artificial horizon (CRSF only, optional)
+  vspd = "VSpd",   -- vertical speed (m/s) for an artificial horizon (optional)
 }
 
 -- Event sounds. Folder fixed (folder upper, files lower, as in the repo);
@@ -986,6 +987,7 @@ function M.readSnapshot(state, now)
   local yaw     = M.validRange(readPresent(has, S, "yaw"), -7, 7)
   local roll    = M.validRange(readPresent(has, S, "roll"), -7, 7)
   local pitch   = M.validRange(readPresent(has, S, "pitch"), -7, 7)
+  local vspd    = M.validRange(readPresent(has, S, "vspd"), -100, 100)
   yaw   = yaw and (math.deg(yaw) % 360)
   roll  = roll and (math.deg(roll) + 540) % 360 - 180
   pitch = pitch and (math.deg(pitch) + 540) % 360 - 180
@@ -1033,6 +1035,7 @@ function M.readSnapshot(state, now)
     yaw           = yaw,
     roll          = roll,
     pitch         = pitch,
+    vspd          = vspd,
     armed         = armed,
     armedKnown    = armedKnown,
     fmText        = type(fm) == "string" and fm ~= "",   -- any FM text this sample
@@ -1181,6 +1184,7 @@ function M.evaluate(state, snap, now)
   -- Attitude for an artificial horizon, the last values (kept across flights).
   state.attRoll, state.attPitch = snap.roll or state.attRoll, snap.pitch or state.attPitch
   result.roll, result.pitch = state.attRoll, state.attPitch
+  result.vspd = snap.vspd   -- vertical speed, nil without the sensor
 
   -- Flight phase from the link, the armed state and the last tick's preflight
   -- check. A new flight (also after the end hold) starts from a clean state.

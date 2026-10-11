@@ -527,7 +527,7 @@ local function flightView(w, on)
               atHome = g.atHome, gpsState = g.gpsState, noHome = g.noHome, sector = g.sector,
               courseValid = g.courseValid, estimated = g.noseEstimated, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
               alt = g.alt, altOver = g.altOver, distOver = g.distOver,
-              pitch = g.pitch, roll = g.roll }   -- attitude for the horizon
+              pitch = g.pitch, roll = g.roll, gspd = g.gspd, vspd = g.vspd }   -- for the horizon
   end
   if r and r.status == "running" then v.link = linkView(w, r) end
   return v
