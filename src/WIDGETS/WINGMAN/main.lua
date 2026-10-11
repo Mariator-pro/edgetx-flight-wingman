@@ -469,9 +469,9 @@ local BASELINE  = 0.76   -- baseline inside a text box, as a share of its report
 -- a word in a bar; measured on BOLD in the 800 x 480 simulator.
 local CAP_TOP, CAP_H = 0.185, 0.593
 local BAR_TOP, BAR_BOTTOM = 170, 204   -- battery and link bar, 34 px high
-local FONTS_LRG = { hero = XLSIZE or DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
+local FONTS_LRG = { hero = DBLSIZE, unit = MIDSIZE, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
                     value = 0, side = MIDSIZE, title = SMLSIZE, stage = BOLD, ready = DBLSIZE }
-local FONTS_STD = { hero = DBLSIZE, unit = SMLSIZE, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
+local FONTS_STD = { hero = DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
                     value = SMLSIZE, side = 0, title = SMLSIZE, stage = SMLSIZE, ready = MIDSIZE }
 local STAGE_COL = { [1] = WARN_COL, [2] = CRIT_COL }
 -- Level colour: 0 green (accent), 1 yellow, 2 red.
