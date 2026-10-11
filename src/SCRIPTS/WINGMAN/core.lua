@@ -658,14 +658,23 @@ local function pollHold(w, now, sign)
 end
 
 -- The search page closes on the battery selection's confirm gesture (aileron
--- held right). w.searchClose: hold 0..1.
-local function pollSearchClose(w, now)
-  local done
-  w.searchClose, done = pollHold(w, now, 1)
-  if done then
+-- held right); aileron held left mutes or unmutes the finder beeps.
+-- w.searchHold: hold -1..1, negative while held left.
+local function pollSearchHold(w, now)
+  local sign = (getValue("ail") or 0) < 0 and -1 or 1
+  local hold, done = pollHold(w, now, sign)
+  w.searchHold = sign * hold
+  if done and sign < 0 then
+    w.finderMuted = not w.finderMuted
+  elseif done then
     w.searching = nil
     if w.lipo then w.lipo.confirmArmed = false end   -- the same hold must not confirm a pack
   end
+end
+
+-- A new search starts with the finder beeps on.
+local function startSearch(w)
+  w.searching, w.finderMuted = true, nil
 end
 
 -- Pages from the cores. connected: link up (before the waiting overrides).
@@ -692,10 +701,10 @@ local function buildPages(w, on, now, connected)
     if r and r.modeName then w.lastMode = r.modeName end
     local g = gpsRes(w, on)
     if g and g.atHome ~= nil then w.farOut = not g.atHome end   -- the GPS core forgets it once the link is gone
-    if disarmed and w.flown and w.farOut then w.searching = true end   -- landed or crashed far out
+    if disarmed and w.flown and w.farOut then startSearch(w) end   -- landed or crashed far out
   elseif w.linked then     -- link just lost: search when the last position is far out
     w.linked, w.lostAt = false, now
-    if w.phase == M.ENDED and w.flown and w.farOut then w.searching = true end
+    if w.phase == M.ENDED and w.flown and w.farOut then startSearch(w) end
   end
 
   if w.armed then
@@ -808,8 +817,9 @@ end
 -- a strength 0..1 over FINDER_MIN..FINDER_MAX dBm and beeps that rise in pitch
 -- and come faster with it (Geiger style). rss nil: no link, the finder rests and
 -- starts fresh; so does a change of kind (RSS at 25 mW or plain), the two scales
--- differ by the TX power. Sets v.signal (dBm, rounded), v.strength, v.beepAt
--- (getTime of the last beep) and v.beepGap (getTime units to the next) on the search view.
+-- differ by the TX power; w.finderMuted keeps the beeps silent. Sets v.signal
+-- (dBm, rounded), v.strength, v.beepAt (getTime of the last beep), v.beepGap
+-- (getTime units to the next) and v.muted on the search view.
 M.FINDER_MIN, M.FINDER_MAX = -110, -40              -- dBm
 local FINDER_TONE = { 600, 1200 }                   -- Hz, weak .. strong
 local FINDER_GAP  = { 120, 10 }                     -- getTime units between beeps, weak .. strong
@@ -824,9 +834,9 @@ function M.updateFinder(w, v, rss, now, kind)
   local gap = FINDER_GAP[1] + (FINDER_GAP[2] - FINDER_GAP[1]) * s
   if not f.beepAt or now - f.beepAt >= gap then
     f.beepAt = now
-    if playTone then playTone(math.floor(FINDER_TONE[1] + (FINDER_TONE[2] - FINDER_TONE[1]) * s), FINDER_BEEP, 0) end
+    if playTone and not w.finderMuted then playTone(math.floor(FINDER_TONE[1] + (FINDER_TONE[2] - FINDER_TONE[1]) * s), FINDER_BEEP, 0) end
   end
-  v.signal, v.strength, v.beepAt, v.beepGap = math.floor(f.avg + 0.5), s, f.beepAt, gap
+  v.signal, v.strength, v.beepAt, v.beepGap, v.muted = math.floor(f.avg + 0.5), s, f.beepAt, gap, w.finderMuted
 end
 
 -- Timer 1 of the model in seconds, nil while it is switched off.
@@ -1058,7 +1068,7 @@ function M.tick(w, on)
       w.flight, w.pre, w.search, w.post = nil, nil, nil, nil
     end
     if w.search then
-      pcall(pollSearchClose, w, now)
+      pcall(pollSearchHold, w, now)
       if not w.searching then w.search = nil end   -- closed by the gesture just now
     end
     if w.search then

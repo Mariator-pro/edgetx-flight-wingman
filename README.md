@@ -169,6 +169,7 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 
 - **Pack selection:** elevator moves the cursor, aileron held right for 1 s confirms.
 - **Close the search page:** aileron held right for 1 s.
+- **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
 - **Show the last post-flight page again:** on the waiting page, aileron held left for 1 s.
 
 ---

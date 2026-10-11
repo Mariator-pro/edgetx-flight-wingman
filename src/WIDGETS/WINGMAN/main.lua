@@ -202,7 +202,8 @@ local function fillBar(x, y, w, h, r, color)
 end
 
 -- Bottom right of the page (countdowns, stick holds): a bar filled to frac
--- (0..1) in color, txt left of it; laid out for 800 x 480 like the flight page.
+-- (0..1, negative: -1..0 filled from the right) in color, txt left of it; laid
+-- out for 800 x 480 like the flight page.
 local CD_BAR_W = 120   -- design px
 local function drawCornerBar(z, txt, frac, color)
   local kx = z.w / 800
@@ -211,8 +212,8 @@ local function drawCornerBar(z, txt, frac, color)
   local barW, barH = math.floor(CD_BAR_W * kx + 0.5), math.max(3, sc(6))
   local bx, by = z.w - math.floor(18 * kx + 0.5) - barW, z.h - sc(14) - barH
   fillRounded(bx, by, barW, barH, math.floor(barH / 2), COLORS.track)
-  local fw = math.floor(barW * math.max(0, math.min(1, frac)))
-  if fw >= barH then fillRounded(bx, by, fw, barH, math.floor(barH / 2), color) end
+  local fw = math.floor(barW * math.min(1, math.abs(frac)))
+  if fw >= barH then fillRounded(frac < 0 and bx + barW - fw or bx, by, fw, barH, math.floor(barH / 2), color) end
   dtext(bx - sc(12) - textW(txt, SMLSIZE), by + math.floor((barH - fontH(SMLSIZE)) / 2), txt, COLORS.muted, SMLSIZE)
 end
 
@@ -495,14 +496,16 @@ local function flightLayout(z)
   return L
 end
 
--- Speaker glyph h px high, left edge x, centred on cy; accent while lit (a finder beep).
-local function drawSpeaker(x, cy, h, lit)
+-- Speaker glyph h px high, left edge x, centred on cy; accent while lit (a finder beep),
+-- struck through when muted.
+local function drawSpeaker(x, cy, h, lit, muted)
   local col = lit and COLORS.accent or COLORS.muted
   local bw, bt = math.max(2, math.floor(h * 0.25)), math.max(2, math.floor(h * 0.2))
   local cw, ch = math.max(3, math.floor(h * 0.45)), math.floor(h * 0.45)
   lcd.drawFilledRectangle(x, cy - bt, bw, 2 * bt, col)
   fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col)
   fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col)
+  if muted then thickLine(x - 1, cy + ch, x + bw + cw, cy - ch, COLORS.fg) end
 end
 
 -- Finder strength 0..1 as 20 segments over w.
@@ -523,9 +526,10 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local x, y, right, bottom = x0 + p, y0 + p, x0 + pw - p, y0 + ph - p
   local fh = fontH(SMLSIZE)
 
-  -- Bottom row, always reserved: how to close the page, the hold as a bar at
-  -- the bottom right filling up while the aileron is held right.
-  drawCornerBar(ctx.zone, "ail: hold > to close", ctx.w.searchClose or 0, COLORS.accent)
+  -- Bottom row, always reserved: the two aileron holds (mute left, close right),
+  -- the hold as a bar at the bottom right filling towards the held side.
+  local hint = ctx.w.finderMuted and "ail hold: < sound  close >" or "ail hold: < mute  close >"
+  drawCornerBar(ctx.zone, hint, ctx.w.searchHold or 0, COLORS.accent)
   bottom = bottom - fh - p
 
   -- Title with the accent square of the column titles, bold like Lipo Nanny's
@@ -558,7 +562,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local sigNum = v.signal and tostring(v.signal) or ((v.live and ctx.w.rssi) and string.format("%d%%", ctx.w.rssi) or "--")
   local sigUnit = v.signal and "dBm" or ""
   -- speaker lit 150 ms after a beep, at most half the gap so fast beeps still blink
-  local lit = v.beepAt and getTime() - v.beepAt < math.min(15, (v.beepGap or 30) / 2)
+  local lit = not v.muted and v.beepAt and getTime() - v.beepAt < math.min(15, (v.beepGap or 30) / 2)
 
   dtext(x, y, "FROM HOME", COLORS.muted, SMLSIZE)
   local num, unit = fmtDist(v.distM)
@@ -577,7 +581,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     if colW(nf) <= room then
       local cx = left + math.floor((room - colW(nf)) / 2)
       dtext(cx, y, "SIGNAL", COLORS.muted, SMLSIZE)
-      if v.signal then drawSpeaker(cx + textW("SIGNAL", SMLSIZE) + pad, y + math.floor(fh / 2), fh, lit) end
+      if v.signal then drawSpeaker(cx + textW("SIGNAL", SMLSIZE) + pad, y + math.floor(fh / 2), fh, lit, v.muted) end
       local ny = y + fh + math.floor((bh - fontH(nf)) / 2)
       dtext(cx, ny, sigNum, v.live and COLORS.fg or COLORS.muted, nf)
       if sigUnit ~= "" then
@@ -618,7 +622,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     -- finder bar over the width, the speaker at its right end
     local spW = v.signal and fh or 0
     drawSegBar(x, y, right - x - spW, barH, v.strength or 0)
-    if v.signal then drawSpeaker(right - math.floor(fh * 0.8), y + math.floor(barH / 2), fh, lit) end
+    if v.signal then drawSpeaker(right - math.floor(fh * 0.8), y + math.floor(barH / 2), fh, lit, v.muted) end
     y = y + barH + p
   elseif lineMode then
     y = y + fh + p + barH + p
@@ -871,8 +875,9 @@ end
 local NORTH_UP = false
 -- kind from compass.label: "ring" (before home), "house" (on the home point) or
 -- "arrow"; course and rel smoothed like on GPS Homer.
+local function compassR(L) return math.floor(70 * L.k * 0.8 + 0.5) end   -- design: 200 unit compass drawn at 160 px
 local function drawCompass(L, cx, cy, g, kind, course, rel)
-  local R = math.floor(70 * L.k * 0.8 + 0.5)   -- design: 200 unit compass drawn at 160 px
+  local R = compassR(L)
   local col = { track = COLORS.track, fg = COLORS.fg, muted = COLORS.muted }
   if kind ~= "arrow" then
     compass.ring(cx, cy, R, NORTH_UP and 0 or -(course or 0), nil, false, NORTH_UP, col)
@@ -1353,8 +1358,11 @@ local function drawGps(L, x, w, g, alert, ctx)
                                      courseValid = g.courseValid, estimated = g.estimated, rel = sm.rel,
                                      sector = g.sector, bearing = g.bearing },
                                    { ahead = g.ahead or 15, behind = g.behind or 165 })
-    local cx, base = x + math.floor(w / 2), L.y(308)
-    drawCompass(L, cx, L.y(208), g, kind, sm.course, sm.rel)
+    -- the letters keep their size on small screens: the line moves down to stay clear of the S
+    local cx, cy = x + math.floor(w / 2), L.y(208)
+    local sBottom = cy + compass.letterRadius(compassR(L)) + math.ceil(fontH(SMLSIZE) / 2)
+    local base = math.max(L.y(308), sBottom + math.max(3, L.s(6)) + math.floor(fontH(L.f.value) * BASELINE + 0.5))
+    drawCompass(L, cx, cy, g, kind, sm.course, sm.rel)
     local col = (lb.col == "warn" and WARN_COL) or (lb.col == "crit" and CRIT_COL)
                 or (lb.col == "muted" and COLORS.muted) or COLORS.fg
     if lb.cap then
