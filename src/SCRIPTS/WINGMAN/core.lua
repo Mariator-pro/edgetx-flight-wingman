@@ -494,6 +494,7 @@ local function linkView(w, r)
            rss1 = dual and snap.rss1 or nil, rss2 = dual and snap.rss2 or nil, rsnr = snap.rsnr,
            -- "DYN" / "MAX" beside TX POWER, DYN: the range bar's lightened end in %
            pwrTag = r.pwrTag, reserve = r.pwrReservePct,
+           warn = w.mods.link.warnPct(r.sensLimit),   -- stage 1 mark on the range bar, nil for an unknown mode
            lqStage = (lqLevel and snap.rqly) and lqLevel(snap.rqly) or nil }
 end
 

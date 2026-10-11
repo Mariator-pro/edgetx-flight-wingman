@@ -468,7 +468,7 @@ local BASELINE  = 0.76   -- baseline inside a text box, as a share of its report
 -- Capital letters inside a text box (share of its reported height), for centring
 -- a word in a bar; measured on BOLD in the 800 x 480 simulator.
 local CAP_TOP, CAP_H = 0.185, 0.593
-local BAR_TOP, BAR_BOTTOM = 160, 194   -- battery and link bar, 34 px high, room for the mark labels
+local BAR_TOP, BAR_BOTTOM = 170, 204   -- battery and link bar, 34 px high
 local FONTS_LRG = { hero = XLSIZE or DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
                     value = 0, side = MIDSIZE, title = SMLSIZE, stage = BOLD, ready = DBLSIZE }
 local FONTS_STD = { hero = DBLSIZE, unit = SMLSIZE, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
@@ -765,11 +765,8 @@ local function drawBattBar(L, x, w, b, col)
   local fw = math.floor(w * math.max(0, math.min(100, b.pct or 0)) / 100)
   fillBar(x, by, fw, bh, r, col)
   local t = L.s(4)
-  for _, m in ipairs({ { b.warn, WARN_COL, "WARN", L.y(BAR_TOP - 7) }, { b.crit, CRIT_COL, "CRIT", L.y(BAR_BOTTOM + 20) } }) do
-    local mx = x + math.floor(w * m[1] / 100)
-    lcd.drawFilledRectangle(mx, by - t, 2, bh + 2 * t, m[2])
-    local label = string.format("%s %d %%", m[3], m[1])
-    btext(mx - math.floor(textW(label, L.f.label) / 2), m[4], label, m[2], L.f.label)
+  for _, m in ipairs({ { b.warn, WARN_COL }, { b.crit, CRIT_COL } }) do
+    lcd.drawFilledRectangle(x + math.floor(w * m[1] / 100), by - t, L.s(3), bh + 2 * t, m[2])
   end
 end
 
@@ -859,6 +856,10 @@ local function drawLink(L, x, w, l, linkUp)
   if fw > sw then fillBar(x, by, fw, bh, r, reserveColor(l.stage)) end
   if sw > 0 then
     if fillBar(x, by, sw, bh, r, col) and fw > sw then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
+  end
+  if l.warn and not unknown then   -- stage 1 mark as on the battery bar
+    local t = L.s(4)
+    lcd.drawFilledRectangle(x + math.floor(w * l.warn / 100), by - t, L.s(3), bh + 2 * t, WARN_COL)
   end
   drawStage(L, right, true, l.stage, STAGE_FIELD_Y)
 
@@ -1229,6 +1230,9 @@ function HZ.link(L, z, l, linkUp)
   local sh = (l.reserve and not unknown) and math.floor(h * math.max(0, pct - l.reserve) / 100) or fh
   if fh > sh then HZ.vfill(x, bottom, bw, fh, r, reserveColor(l.stage)) end
   HZ.vfill(x, bottom, bw, sh, r, col)
+  if l.warn and not unknown then
+    lcd.drawFilledRectangle(x - L.s(4), bottom - math.floor(h * l.warn / 100) - 1, bw + L.s(8), L.s(3), WARN_COL)
+  end
   local inner = x - L.s(14)
   local modeCap, modeVal = modeParts(l.mode)
   HZ.hero(L, inner, true, fmt("%d", l.range), "%", col, "RANGELIMIT", unknown)
