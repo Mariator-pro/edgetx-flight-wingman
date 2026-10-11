@@ -86,6 +86,16 @@ Besides the two flight views above, the widget shows a page for each other phase
   </tr>
 </table>
 
+The two fields in the header show the flight controller's state on every page:
+
+| Header field | Meaning |
+|---|---|
+| <img src="docs/img/header-mode.png" width="56" alt="ACRO on a grey field"> | Flight mode as the flight controller sends it (any mode, e.g. `ANGL`, `HOR`, `AIR`) |
+| <img src="docs/img/header-mode-blocked.png" width="56" alt="ACRO on a yellow field"> | Arming blocked, the reasons are on the preflight page (Betaflight: the mode, INAV: `!ERR`) |
+| <img src="docs/img/header-mode-rth.png" width="56" alt="RTH on a yellow field"> <img src="docs/img/header-mode-land.png" width="56" alt="LAND on a yellow field"> | Return to home or automatic landing in progress (also `WRTH`, `RTL`, `SRTL`, `ARTL`, `QRTL` and `ALND`, `QLND`, `L2QL` from INAV and ArduPilot) |
+| <img src="docs/img/header-mode-failsafe.png" width="56" alt="!FS! on a red field"> | Failsafe |
+| <img src="docs/img/header-armed.png" width="55" alt="ARMED on a red field"> | Armed |
+
 Meet **Quad**, the Wingman mascot: it keeps you company on the waiting page and looks sad when something in the setup needs your attention.
 
 <p align="center">
@@ -172,7 +182,9 @@ Flight Wingman adds four settings:
 - **Models → Show in Wingman**: switch **Battery**, **Link** and **GPS** on or off per model (default all on). A switched-off column stays empty, is left out of the ready check and frees its space for the others.
 - **Display → Mascot**: the character on the waiting page, `Quad` (default) or `Scout`.
 - **Display → Flight time**: the small value beside the battery percentage on the flight page, `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying).
-- **Display → GPS view**: the layout of the flight page, `Compass` (default, three columns with the compass in the middle) or `Horizon`: battery, satellites and link at the top (battery and link with a vertical bar at the screen edge), below the battery and link values at the sides and in the middle a large artificial horizon from the flight controller's pitch and roll, with the heading on a band at its top (a house towards home), speed (SPD, left) and altitude (ALT, right) tapes (with the vertical speed as a bar and a number at the altitude, when the flight controller sends `VSpd`), roll and pitch as numbers at the aircraft symbol and the home direction with the distance at its bottom. The horizon shows the last pitch and roll that arrived, so it follows the model only with a fast telemetry ratio: set **Telem Ratio** in the ExpressLRS Lua script to 1:4 or faster (with `Std` it moves only every few seconds). Without pitch and roll sensors it shows `NO ATTITUDE`.
+- **Display → GPS view**: the layout of the flight page, `Compass` (default) or `Horizon` (large artificial horizon from the flight controller's pitch and roll, see the screenshot above). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds).
+
+Units follow the radio's own setting (**SYS → Radio setup → Units**): metric shows m, km and km/h, imperial ft, mi and mph. Altitude, speed and vertical speed are shown as their sensors deliver them, so with imperial also set the units of the altitude, speed and `VSpd` sensors on the radio (ft, mph, ft/s); distances are converted.
 
 ---
 

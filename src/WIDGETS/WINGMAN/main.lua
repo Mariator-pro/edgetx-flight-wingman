@@ -324,22 +324,34 @@ end
 -- Search page: radar map left (home in the centre, north up, three rings with
 -- an automatic scale), distance, direction, signal and a map QR code right.
 -- ---------------------------------------------------------------------------
-local RING_STEPS = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000 }
+-- Display units after the radio's setting (GPS Homer reads it). Altitude, speed and
+-- vertical speed come in the sensor units set on the radio, so only their labels
+-- change; distances are computed in metres and scaled by f. Rings in display units,
+-- from ringBig all three labelled in the big unit (half a mile: 0.5, 1, 1.5 mi).
+local UNITS = {
+  metric   = { f = 1, len = "m", spd = "km/h", big = 1000, bigU = "km", vsFull = 5, ringBig = 1000,
+               rings = { 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000 } },
+  imperial = { f = 3.28084, len = "ft", spd = "mph", big = 5280, bigU = "mi", vsFull = 15, ringBig = 2640,
+               rings = { 50, 100, 200, 500, 1000, 2640, 5280, 10560, 26400, 52800, 105600, 264000 } },
+}
+local U = UNITS.metric   -- set per refresh
 local QR_DARK    = lcd.RGB(18, 20, 18)
 local QR_QUIET   = 2      -- white modules around the code
 local UNIT_DROP  = 0.12   -- unit text sits this share of the number height above its box bottom
 
--- Ring spacing in metres: three rings hold everything with 10 % margin.
-local function ringStep(maxM)
-  for _, s in ipairs(RING_STEPS) do
-    if 3 * s >= maxM * 1.1 then return s end
+-- Ring spacing in display units: three rings hold everything with 10 % margin.
+local function ringStep(maxD)
+  for _, s in ipairs(U.rings) do
+    if 3 * s >= maxD * 1.1 then return s end
   end
-  return RING_STEPS[#RING_STEPS]
+  return U.rings[#U.rings]
 end
 
+-- Metres as display text: m or ft, from 1 km or 1 mi (after rounding) in those with one decimal.
 local function fmtDist(m)
-  if m < 1000 then return string.format("%d", math.floor(m + 0.5)), "m" end
-  return string.format("%.1f", m / 1000), "km"
+  local d = math.floor(m * U.f + 0.5)
+  if d < U.big then return string.format("%d", d), U.len end
+  return string.format("%.1f", m * U.f / U.big), U.bigU
 end
 local function distText(m)
   if not m then return "--" end
@@ -377,8 +389,8 @@ local function drawMap(v, x0, y0, s, pad)
   local R = half - fh - pad
   if COLORS.disk then lcd.drawFilledCircle(cx, cy, R + pad, COLORS.disk) end
 
-  local step = ringStep(v.maxM)
-  local k = R / (3 * step)
+  local step = ringStep(v.maxM * U.f)
+  local k = R / (3 * step) * U.f   -- px per metre
   local function xy(n, e) return math.floor(cx + e * k + 0.5), math.floor(cy - n * k + 0.5) end
   local mx, my = xy(v.n, v.e)
   local hr = math.floor(fh * 0.8)
@@ -391,8 +403,8 @@ local function drawMap(v, x0, y0, s, pad)
   local rings, below = {}, false
   for i = 1, 3 do
     local r = math.floor(R * i / 3)
-    local m = step * i
-    local label = (m >= 1000) and string.format("%g km", m / 1000) or string.format("%d m", m)
+    local d = step * i
+    local label = (d >= U.big or step >= U.ringBig) and string.format("%g %s", d / U.big, U.bigU) or string.format("%d %s", d, U.len)
     rings[i] = { r = r, label = label }
     local ly, lw = cy - r + 2, textW(label, SMLSIZE)
     if cx + pad < mlx + mHalf and cx + pad + lw > mlx - mHalf and ly < mTop + fh and ly + fh > mTop then
@@ -589,7 +601,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     -- the three pairs spread evenly over the width
     local cells = {
       { "SIGNAL ", v.signal and (sigNum .. " dBm") or sigNum },
-      { "ALT ", fmt("%d m", v.alt) },
+      { "ALT ", fmt("%d " .. U.len, v.alt) },
       { "SATS ", v.sats and tostring(v.sats) or "--" },
     }
     local used = 0
@@ -892,7 +904,7 @@ local HZ = {
   VS_TAU = 30,    -- vertical speed: smoothing time constant in 10 ms ticks (settled in about 1 s)
   PPD  = 3.5,     -- horizon: design px per degree of pitch
   TAPE_W = 52,    -- speed (left) and altitude (right) tape inside the horizon box
-  TAPE_PPU = 4,   -- tape: design px per km/h or m; ticks every 5, numbers every 10
+  TAPE_PPU = 4,   -- tape: design px per unit (km/h or mph, m or ft); ticks every 5, numbers every 10
   SKY = lcd.RGB(47, 110, 168), GROUND = lcd.RGB(122, 82, 48),
   PILL = lcd.RGB(18, 20, 18), PILL_OPACITY = 4,   -- dark backing for numbers on sky or ground
   WHITE = lcd.RGB(255, 255, 255), GREY = lcd.RGB(150, 150, 150),   -- text on the dark backings, any theme
@@ -989,17 +1001,10 @@ end
 -- Horizon in the box x, y, w, h: sky, ground cut along the horizon (rolled by
 -- roll, moved down by pitch), pitch lines at 10 and 20 deg with their numbers, the
 -- fixed aircraft symbol, roll left of it and pitch below (the last values: how
--- fresh depends on the telemetry ratio). Without attitude sensors a hint instead.
--- Returns true when the attitude was drawn.
+-- fresh depends on the telemetry ratio).
 function HZ.attitude(L, x, y, w, h, g, clear)
   local cx, cy = x + math.floor(w / 2), y + math.floor(h / 2)
   local roll, pitch, rr = g.roll, g.pitch, L.s(4)   -- corner radius as the bars
-  if not (roll and pitch) then
-    fillRounded(x, y, w, h, rr, COLORS.track)
-    local f = L.f.value
-    dtext(cx - math.floor(textW("NO ATTITUDE", f) / 2), cy - math.floor(fontH(f) / 2), "NO ATTITUDE", COLORS.muted, f)
-    return false
-  end
   local a, ppd = math.rad(roll), HZ.PPD * L.k
   local dx, dy = math.cos(a), -math.sin(a)   -- along the horizon (right side up in a right bank)
   local nx, ny = -dy, dx                      -- towards the ground
@@ -1099,12 +1104,12 @@ function HZ.tape(L, x, y, w, h, v, right, name, lo, vcol, top0, hide, below)
 end
 
 -- Vertical speed at the altitude tape x, y, w, h: a bar on its horizon side from the
--- middle, up in white when climbing, down in yellow when sinking (full at 5 m/s), and
--- the value in m/s under the altitude box.
+-- middle, up in white when climbing, down in yellow when sinking (full at 5 m/s or
+-- 15 ft/s), and the value in the sensor's unit under the altitude box.
 function HZ.vario(L, x, y, w, h, vs)
   local f, cy = L.f.cap, y + math.floor(h / 2)
   local fh, bw = fontH(f), L.s(5)
-  local len = math.floor(math.min(5, math.abs(vs)) / 5 * (h / 2 - fh - L.s(14)) + 0.5)
+  local len = math.floor(math.min(U.vsFull, math.abs(vs)) / U.vsFull * (h / 2 - fh - L.s(14)) + 0.5)
   if len > 0 then
     lcd.drawFilledRectangle(x - bw, vs > 0 and cy - len or cy, bw, len, vs > 0 and HZ.WHITE or WARN_COL)
   end
@@ -1278,15 +1283,16 @@ function HZ.middle(L, g, ctx)
   local now = getTime()
   sm.vs = g.vspd and (sm.vs and sm.vs + (g.vspd - sm.vs) * math.min(1, (now - sm.vsAt) / HZ.VS_TAU) or g.vspd)
   sm.vsAt = now
-  if HZ.attitude(L, x, top, w, h, g, top + L.s(HZ.BAND_H) + L.s(4)) then
-    local hx, hy, hs = HZ.housePos(L, x, top, w, sm.course, rel)
-    local hide = hx and { hx - hs - L.s(2), hy, hx + hs + L.s(2), hy + 2 * hs }
-    local top0 = top + L.s(HZ.BAND_BASE + 4)
-    HZ.tape(L, x, top, tw, h, g.gspd, false, "SPD", 0, nil, top0, hide)
-    HZ.tape(L, x + w - tw, top, tw, h, g.alt, true, "ALT", nil, g.altOver and CRIT_COL, top0, hide,
-            sm.vs and fh + L.s(3))   -- red over Max altitude; room for the vertical speed
-    if sm.vs then HZ.vario(L, x + w - tw, top, tw, h, sm.vs) end
-  end
+  -- horizon only with pitch and roll (the cores hold the last values, nil: no sensor)
+  if g.roll and g.pitch then HZ.attitude(L, x, top, w, h, g, top + L.s(HZ.BAND_H) + L.s(4))
+  else fillRounded(x, top, w, h, L.s(4), COLORS.track) end
+  local hx, hy, hs = HZ.housePos(L, x, top, w, sm.course, rel)
+  local hide = hx and { hx - hs - L.s(2), hy, hx + hs + L.s(2), hy + 2 * hs }
+  local top0 = top + L.s(HZ.BAND_BASE + 4)
+  HZ.tape(L, x, top, tw, h, g.gspd, false, "SPD", 0, nil, top0, hide)   -- tapes always, "--" without a value
+  HZ.tape(L, x + w - tw, top, tw, h, g.alt, true, "ALT", nil, g.altOver and CRIT_COL, top0, hide,
+          sm.vs and fh + L.s(3))   -- red over Max altitude; room for the vertical speed
+  if sm.vs then HZ.vario(L, x + w - tw, top, tw, h, sm.vs) end
   HZ.band(L, x, top, w, sm.course, rel)
   local py = top + h - fh - L.s(8)
   if lb and not lb.cap then
@@ -1297,7 +1303,7 @@ function HZ.middle(L, g, ctx)
   -- home: house, direction (with a heading) and distance
   local hs = math.floor(fh * 0.4)
   local text = lb and (lb.text .. "  ") or ""
-  local dist = distText(g.dist)   -- km from 1000 m
+  local dist = distText(g.dist)   -- km from 1000 m, mi from 5280 ft
   local px = HZ.pill(L, cx, py, text, HZ.WHITE, 2 * hs + L.s(8), dist, g.distOver and CRIT_COL)   -- distance red over Max distance
   HZ.house(px + hs, py + math.floor((fh - 1.8 * hs) / 2), hs)
 end
@@ -1364,8 +1370,8 @@ local function drawGps(L, x, w, g, alert, ctx)
   end
 
   local half = math.floor(w / 2)
-  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d m", g.alt), g.altOver and CRIT_COL)
-  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d m", g.dist), g.distOver and CRIT_COL)
+  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d " .. U.len, g.alt), g.altOver and CRIT_COL)
+  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d " .. U.len, g.dist and g.dist * U.f), g.distOver and CRIT_COL)
 end
 
 -- Column lines from top (default: under the header) down to bottom. All three
@@ -1618,7 +1624,7 @@ local POST_COLS_B = 306   -- columns end here
 local POST_ROW0, POST_ROW_H = 62, 30   -- first value row (offset in the column), pitch
 local ALERT_ROW_H = 24
 
-local function kmText(m) return m and string.format("%.1f", m / 1000) or "--" end
+local function kmText(m) return m and string.format("%.1f", m * U.f / U.big) or "--" end   -- km or mi
 
 -- One key figure: caption over a big value with a smaller unit, centred on cx.
 -- cap: text, or { long, short } (the short one when the long one is wider than maxW).
@@ -1672,8 +1678,8 @@ local function drawPostColumns(L, c, p)
     local co = g.coord or function(v) return string.format("%.5f", v) end
     drawRows(L, c[3], c[4], {
       { { "MAX DISTANCE", "MAX DIST" }, distText(g.maxDist) },
-      { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d m", g.maxAlt) },
-      { { "MAX SPEED", "MAX SPD" }, fmt("%d km/h", g.maxSpd) },
+      { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d " .. U.len, g.maxAlt) },
+      { { "MAX SPEED", "MAX SPD" }, fmt("%d " .. U.spd, g.maxSpd) },
       { { "LAST POSITION", "LAST POS" }, g.lat and co(g.lat) or "--" },
       { "", g.lon and co(g.lon) or "" },
     })
@@ -1726,7 +1732,7 @@ local function drawPost(ctx)
   drawKpi(L, math.floor(third / 2), "FLIGHT TIME", p.time or "--")
   drawKpi(L, third + math.floor(third / 2), { "USED CAPACITY", "USED CAP" }, fmt("%d", b.used), "mAh",
           STAGE_COL[stageOf(b.left, b.warn or 0, b.crit or 0)], third - L.s(16))
-  drawKpi(L, 2 * third + math.floor(third / 2), "FLOWN", kmText(g.flown), "km")
+  drawKpi(L, 2 * third + math.floor(third / 2), "FLOWN", kmText(g.flown), U.bigU)
   local kpiB, colsB = L.y(POST_KPI_H), L.y(POST_COLS_B)
   lcd.drawFilledRectangle(0, kpiB, z.w, 1, COLORS.track)
   lcd.drawFilledRectangle(0, colsB, z.w, 1, COLORS.track)
@@ -2159,6 +2165,7 @@ local function refresh(ctx, event, touchState)
   background(ctx)   -- background() does not run while the widget is visible
   COLORS = (ctx.options.Theme == 2) and LIGHT or DARK
   NORTH_UP = (ctx.options.Compass == 2)
+  U = (ctx.w and ctx.w.imperial) and UNITS.imperial or UNITS.metric
 
   local z = ctx.zone
   if not COLORS.transparent then

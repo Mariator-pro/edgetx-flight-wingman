@@ -142,6 +142,7 @@ function M.new()
   if m.gps then
     w.gps = m.gps.newState()
     w.gps.useMsp = true
+    w.imperial = m.gps.PARAMS.UNITS == "imperial"   -- the radio's units, read by the GPS core
   end
   if M.DEMO then
     local chunk = loadScript("/SCRIPTS/WINGMAN/demo.lua")
