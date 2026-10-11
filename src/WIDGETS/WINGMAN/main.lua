@@ -934,11 +934,10 @@ function HZ.housePos(L, x, y, w, course, rel)
   return math.max(x + hs, math.min(x + w - hs, hx)), y + L.s(HZ.BAND_BASE + 6), hs
 end
 
--- House (roof tip at x, y, roof half width s) in the warning yellow.
+-- House (roof tip at x, y, roof half width s): the compass house in the warning yellow, door as the pill.
 function HZ.house(x, y, s)
-  fillTri(x, y, x - s, y + s, x + s, y + s, WARN_COL)
-  local bw = math.floor(s * 1.2)
-  lcd.drawFilledRectangle(x - math.floor(bw / 2), y + s, bw, math.floor(s * 0.8), WARN_COL)
+  local r = s / 0.85
+  compass.house(x, y + math.floor(r * 0.75), r, WARN_COL, HZ.PILL)
 end
 
 -- Polygon (list of {x, y}) cut to the side where (q - p) . n >= 0. Returns the

@@ -137,7 +137,7 @@ The sound files always live under `/SOUNDS/en/SCRIPTS/`, no matter which languag
 3. Add a widget to the zone and choose **Wingman** from the list.
 4. *(Optional)* Open the widget settings to adjust the look:
    - **Theme**: `Dark` or `Light`.
-   - **Compass**: `NoseUp` (default): flight direction on top, the arrow points home. `NorthUp`: north on top like a map, an `H` on the ring marks home.
+   - **Compass**: `NoseUp` (default): flight direction on top, the arrow points home. `NorthUp`: north on top like a map, a house on the ring marks home.
    - **Transparency**: how much of the radio theme shows through the milky background (light theme only): `0%` opaque, `100%` no overlay.
    - **Accent**: color of the heading text: `Default` (green), `Theme` (the focus color of your EdgeTX theme) or `Custom` (pick any color under **AccentColor**).
 

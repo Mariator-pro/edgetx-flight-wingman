@@ -2,12 +2,12 @@
 -- (display only, no state between calls). Load with loadScript(path, "bt")().
 --
 -- Ring band in track colour with ticks at the intercardinals and N E S W
--- outside it (N in the text colour), a notched arrow, an H badge on the letter
+-- outside it (N in the text colour), a notched arrow, a house on the letter
 -- track towards home. Two modes:
---   North up: ring fixed, arrow = course, H = bearing to home.
+--   North up: ring fixed, arrow = course, house = bearing to home.
 --   Nose up:  ring turns with the course, a fixed mark at 12 o'clock, the arrow
---             points home (bearing relative to the course), no H.
--- Without a course the ring holds north up, the H marks home and a crosshair
+--             points home (bearing relative to the course), no house.
+-- Without a course the ring holds north up, the house marks home and a crosshair
 -- replaces the arrow. Compact: the bare band (no letters, ticks or mark) for
 -- boxes too low for the letters, home as a dot on the band.
 -- Colours: col = { track = ..., fg = ..., muted = ... } (lcd colour values).
@@ -82,7 +82,7 @@ local function drawNoseMark(cx, cy, tr, col)
 end
 
 -- Ring with ticks and letters turned by rotDeg (Nose up: -course). skipAng: a
--- letter or tick the H badge (or the nose mark) would touch there is left out.
+-- letter or tick the house (or the nose mark) would touch there is left out.
 -- Returns the letter radius.
 function C.ring(cx, cy, R, rotDeg, skipAng, compact, northUp, col)
   local rw = C.bandWidth(R)
@@ -143,7 +143,7 @@ function C.house(cx, cy, r, col, doorCol)
   lcd.drawFilledRectangle(cx - math.floor(dw / 2), base - dh, dw, dh, doorCol)
 end
 
--- H badge on the letter track, or (compact) a dot on the band.
+-- House on the letter track, or (compact) a dot on the band.
 local function drawHome(cx, cy, R, tr, bearing, compact, col)
   if not bearing then return end
   local rw = C.bandWidth(R)
@@ -153,8 +153,7 @@ local function drawHome(cx, cy, R, tr, bearing, compact, col)
     return
   end
   local hx, hy = pt(cx, cy, tr, bearing)
-  if lcd.drawCircle then lcd.drawCircle(hx, hy, math.floor(fontH() / 2) - 1, col.fg) end
-  text(hx - math.floor(textW("H") / 2), hy - math.floor(fontH() / 2), "H", col.fg)
+  C.house(hx, hy, math.floor(fontH() * 0.6), col.fg, col.track)
 end
 
 -- The whole compass. d = { course = deg or nil (no valid course), rel = home
