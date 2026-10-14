@@ -19,7 +19,6 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 - [🎯 What is it for?](#-what-is-it-for)
 - [🧰 Requirements](#-requirements)
 - [📥 Installation](#-installation)
-- [⚙️ Customizing](#️-customizing)
 - [🛠️ Troubleshooting](#️-troubleshooting)
 - [🤝 Contributing](#-contributing)
 - [⚠️ Disclaimer](#️-disclaimer)
@@ -54,7 +53,7 @@ Three widgets side by side share a small screen, yet each phase of a flight need
   </tr>
   <tr>
     <td align="center"><b>Flight, compass</b><br>three columns with the home arrow</td>
-    <td align="center"><b>Flight, horizon</b><br>large artificial horizon (Flight Bag: GPS view)</td>
+    <td align="center"><b>Flight, horizon</b><br>large artificial horizon (<a href="docs/flightbag.md#display">Flight Bag: GPS view</a>)</td>
   </tr>
 </table>
 
@@ -155,7 +154,7 @@ The sound files always live under `/SOUNDS/en/SCRIPTS/`, no matter which languag
 
 ### 3. Set up the projects
 
-Open **SYS → Tools → Flight Bag** and set up battery, link and GPS as described for the single projects (at least one battery profile and the model settings in Lipo Nanny). An icon with a warning sign tells you what is still missing.
+Open **SYS → Tools → Apps → Flight Bag** and set up battery, link and GPS (at least one battery profile and the model settings). An icon with a warning sign tells you what is still missing. All pages and rows, including Wingman's own settings (**Models → Show in Wingman**, **Display**), are described in the [Flight Bag guide](docs/flightbag.md).
 
 ### 4. Try it out
 
@@ -174,24 +173,9 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 
 ---
 
-## ⚙️ Customizing
-
-All settings are made in **Flight Bag**, the settings tool shared by all four projects (**SYS → Tools → Flight Bag**). Thresholds, sounds and vibration belong to the single projects and work exactly as described there: [Lipo Nanny](https://github.com/Mariator-pro/edgetx-lipo-nanny/blob/main/docs/configuration.md), [Link Sentinel](https://github.com/Mariator-pro/elrs-link-sentinel#️-customizing), [GPS Homer](https://github.com/Mariator-pro/edgetx-gps-homer#️-customizing).
-
-Flight Wingman adds four settings:
-
-- **Models → Show in Wingman**: switch **Battery**, **Link** and **GPS** on or off per model (default all on). A switched-off column stays empty, is left out of the ready check and frees its space for the others.
-- **Display → Mascot**: the character on the waiting page, `Quad` (default) or `Scout`.
-- **Display → Flight time**: the small value beside the battery percentage on the flight page, `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying).
-- **Display → GPS view**: the layout of the flight page, `Compass` (default) or `Horizon` (large artificial horizon from the flight controller's pitch and roll, see the screenshot above). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds).
-
-Units follow the radio's own setting (**SYS → Radio setup → Units**): metric shows m, km and km/h, imperial ft, mi and mph. Altitude, speed and vertical speed are shown as their sensors deliver them, so with imperial also set the units of the altitude, speed and `VSpd` sensors on the radio (ft, mph, ft/s); distances are converted.
-
----
-
 ## 🛠️ Troubleshooting
 
-- **Waiting page with a sad mascot and "Configuration error / Please check Tool Flight Bag":** Something is not set up yet. Open **Tools → Flight Bag**; the icon with the warning sign names the problem in its popup.
+- **Waiting page with a sad mascot and "Configuration error / Please check Tool Flight Bag":** Something is not set up yet. Open **SYS → Tools → Apps → Flight Bag**; the icon with the warning sign names the problem in its popup.
 - **"Core missing / Reinstall Flight Wingman":** `/SCRIPTS/WINGMAN/core.lua` is not on the card. Copy the folders again.
 - **The flight page comes several seconds after arming:** The telemetry ratio is set to `Std`. Set it faster, for example 1:16.
 - **Every announcement plays twice:** A single widget or function script of the three projects is still active on this model. Remove it.
