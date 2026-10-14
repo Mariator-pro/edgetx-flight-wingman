@@ -114,6 +114,17 @@ local function fmt(f, v)
   return string.format(f, v)
 end
 
+-- Capacity and current in a shorter form from 10000 mAh / 100 A on, so they keep
+-- their column width: "15.8 Ah", "123 A".
+local function fmtMah(v)
+  if v ~= nil and math.floor(v + 0.5) >= 10000 then return string.format("%.1f Ah", math.floor(v + 0.5) / 1000) end
+  return fmt("%d mAh", v)
+end
+local function fmtAmps(v)
+  if v ~= nil and v >= 99.95 then return fmt("%d A", v) end
+  return fmt("%.1f A", v)
+end
+
 local function fillTri(x1, y1, x2, y2, x3, y3, col)
   if lcd.drawFilledTriangle then
     lcd.drawFilledTriangle(x1, y1, x2, y2, x3, y3, col)
@@ -813,9 +824,9 @@ local function drawBattery(L, x, w, b, sideLabel, sideValue)
   drawGrid(L, x, w, {
     { "VOLTAGE", fmt("%.1f V", b.volt), hot },
     { "PER CELL", fmt("%.2f V", b.cell), hot },
-    { "LEFT", fmt("%d mAh", b.left) },
-    { "USED", fmt("%d mAh", b.used) },
-    { "CURRENT", fmt("%.1f A", b.amps) },   -- capacity is in the title
+    { "LEFT", fmtMah(b.left) },
+    { "USED", fmtMah(b.used) },
+    { "CURRENT", fmtAmps(b.amps) },   -- capacity is in the title
   })
 end
 
@@ -1205,9 +1216,9 @@ function HZ.battery(L, z, b, sideCap, sideValue)
   HZ.rows(L, x, L.x(HZ.X0) - L.x(26), {
     { "VOLTAGE", fmt("%.1f V", b.volt), hot },
     { "PER CELL", fmt("%.2f V", b.cell), hot },
-    { "LEFT", fmt("%d mAh", b.left) },
-    { "USED", fmt("%d mAh", b.used) },
-    { "CURRENT", fmt("%.1f A", b.amps) },
+    { "LEFT", fmtMah(b.left) },
+    { "USED", fmtMah(b.used) },
+    { "CURRENT", fmtAmps(b.amps) },
   })
 end
 
@@ -1681,7 +1692,7 @@ local function drawPostColumns(L, c, p)
     drawRows(L, c[1], c[2], {
       { "CHARGE", fmt("%d %%", b.left), STAGE_COL[stage], fmt("%d %%", b.start) .. " -> " },
       { { "LAST VOLTAGE", "LAST V" }, lastV },
-      { { "MAX CURRENT", "MAX CURR" }, fmt("%.1f A", b.maxA) },
+      { { "MAX CURRENT", "MAX CURR" }, fmtAmps(b.maxA) },
       { "PACK CYCLES", b.cycles or "--" },
     })
   end
