@@ -459,6 +459,13 @@ local function lipoOn(w, on) return on.lipo ~= false and w.mods.lipo and w.lipo 
 local function linkRes(w, on) return on.link ~= false and w.linkRes end
 local function gpsRes(w, on) return on.gps ~= false and w.gpsRes end
 
+-- mAh left in the pack (capacity minus used, incl. the start offset).
+local function leftMah(L, core)
+  local cap = core.effectiveCapacityMah(L)
+  local used = (L.capacity and L.startOffsetMah) and L.capacity + L.startOffsetMah or nil
+  return cap, (cap and used) and math.max(0, cap - used) or nil
+end
+
 -- Battery for the preflight page: the pack selection while it is open, else
 -- the chosen pack; nil before either.
 local function preBattery(w, now)
@@ -477,25 +484,27 @@ local function preBattery(w, now)
   local name, short = packLabel(L.selectedProfile, L.selectedInstances)
   return { name = name, nameShort = short, pct = core.calculateRestPct(L),
            warn = warn, crit = crit, volt = L.voltage,
-           cell = (L.voltage and cells and cells > 0) and L.voltage / cells or nil }
+           cell = (L.voltage and cells and cells > 0) and L.voltage / cells or nil,
+           left = select(2, leftMah(L, core)), chem = L.selectedProfile.chemistry }
 end
 
 local function preGps(w, g)
-  return { sats = g.sats, state = w.mods.gps.fixState(g), dop = g.dop, dopKind = g.dopKind, fix = g.fix }
+  return { sats = g.sats, state = w.mods.gps.fixState(g), dop = g.dop, dopKind = g.dopKind, fix = g.fix,
+           fixLost = g.fixLost }
 end
 
 local function linkView(w, r)
   local snap = r.snapshot or {}
-  local lqLevel = w.mods.link and w.mods.link.lqLevel
   local dual = snap.rss2 ~= nil and snap.rss2 ~= 0
   return { modLine = (w.link and w.link.modLine) or "LINK", lq = snap.rqly, stage = r.stage or 0, sensLimit = r.sensLimit,
-           mode = r.modeName, rssi = r.linkRssi, tpwr = snap.tpwr, ant = snap.ant, range = r.rangePct,
+           mode = r.modeName, rssi = r.linkRssi, tpwr = snap.tpwr, range = r.rangePct,
            -- both antennas only from a dual-antenna receiver (2RSS 0: single antenna)
            rss1 = dual and snap.rss1 or nil, rss2 = dual and snap.rss2 or nil, rsnr = snap.rsnr,
+           ant = snap.ant and snap.ant + 1,   -- ANT 0/1 -> antenna 1/2 like rss1/rss2
            -- "DYN" / "MAX" beside TX POWER, DYN: the range bar's lightened end in %
            pwrTag = r.pwrTag, reserve = r.pwrReservePct,
            warn = w.mods.link.warnPct(r.sensLimit),   -- stage 1 mark on the range bar, nil for an unknown mode
-           lqStage = (lqLevel and snap.rqly) and lqLevel(snap.rqly) or nil }
+           lqCrit = w.mods.link.PARAMS.RQLY_THRESHOLD }  -- stage 2 mark on the preflight LQ bar
 end
 
 local function preView(w, on, now)
@@ -512,14 +521,13 @@ local function flightView(w, on)
   if lipoOn(w, on) and w.lipo.selectedProfile then
     local L, core = w.lipo, w.mods.lipo
     local warn, crit = core.getThresholds(L)
-    local cap = core.effectiveCapacityMah(L)
-    local used = (L.capacity and L.startOffsetMah) and L.capacity + L.startOffsetMah or nil
+    local cap, left = leftMah(L, core)
     local name, short = packLabel(L.selectedProfile, L.selectedInstances)
     v.batt = { name = name, nameShort = short, pct = core.calculateRestPct(L),
                warn = warn, crit = crit, volt = L.voltage,
                cell = (L.voltage and L.cells and L.cells > 0) and L.voltage / L.cells or nil,
-               vLevel = core.voltageLevel(L),   -- per-cell thresholds of the chemistry, as Lipo Nanny
-               left = (cap and used) and math.max(0, cap - used) or nil, used = L.capacity, cap = cap,
+               chem = L.selectedProfile.chemistry,
+               left = left, used = L.capacity, cap = cap,
                amps = L.current, timeLeft = L.timeLeftStr }   -- Lipo Nanny's estimate, every 2 s
   end
   local g, r = gpsRes(w, on), linkRes(w, on)
@@ -528,7 +536,7 @@ local function flightView(w, on)
     v.gps = { sats = g.sats, course = g.course, bearing = g.bearingToHome, rel = g.rel, dist = g.distanceM,
               atHome = g.atHome, gpsState = g.gpsState, noHome = g.noHome, sector = g.sector,
               courseValid = g.courseValid, estimated = g.noseEstimated, ahead = P.AHEAD_DEG, behind = P.BEHIND_DEG,
-              alt = g.alt, altOver = g.altOver, distOver = g.distOver,
+              alt = g.alt, altOver = g.altOver, distOver = g.distOver, fixLost = g.fixLost,
               pitch = g.pitch, roll = g.roll, gspd = g.gspd, vspd = g.vspd }   -- for the horizon
   end
   if r and r.status == "running" then v.link = linkView(w, r) end
@@ -606,7 +614,7 @@ end
 -- Post-flight summary, refreshed every tick while the page shows: a value a
 -- core forgets later (its own end hold) keeps the last one seen.
 local function postView(w, on)
-  local v, old = { time = mmss(w.lastTimerS), alerts = w.alerts }, w.postKeep or {}
+  local v, old = { time = mmss(w.lastTimerS), timeS = w.lastTimerS, alerts = w.alerts }, w.postKeep or {}
   local L = lipoOn(w, on)
   if L and L.phase == "ENDED" and L.lastFlight then
     local lf, core = L.lastFlight, w.mods.lipo
@@ -619,20 +627,19 @@ local function postView(w, on)
       start = (cap and cap > 0 and off) and math.floor(100 - off / cap * 100 + 0.5) or nil,
       left = (cap and cap > 0 and off) and math.max(0, math.floor((cap - lf.usedMah - off) / cap * 100 + 0.5)) or nil,
       cell = lf.lastVoltagePerCell, volt = (lf.lastVoltagePerCell and L.cells) and lf.lastVoltagePerCell * L.cells or nil,
-      maxA = L.maxCurrent, cycles = (#cycles > 0) and table.concat(cycles, ", ") or nil, warn = warn, crit = crit }
+      maxA = L.maxCurrent, cycles = (#cycles > 0) and table.concat(cycles, ", ") or nil, warn = warn, crit = crit,
+      chem = L.selectedProfile and L.selectedProfile.chemistry }
   end
   local g = gpsRes(w, on)
   if g and g.flownM then
     v.gps = { flown = g.flownM, maxDist = g.maxDistM, maxAlt = g.maxAlt, maxSpd = g.maxGspd,
-              lat = g.lastLat, lon = g.lastLon,
+              lat = g.lastLat, lon = g.lastLon, altExceeded = g.altExceeded, distExceeded = g.distExceeded,
               coord = w.mods.gps.formatCoord or function(x) return string.format("%.5f", x) end }
   end
   local r = linkRes(w, on)
   if r and (r.minRqly or r.maxRangePct) then
-    local lqLevel = w.mods.link and w.mods.link.lqLevel
     v.link = { modLine = (w.link and w.link.modLine) or "LINK", minLq = r.minRqly, maxRange = r.maxRangePct,
                maxTpwr = r.maxTpwr, mode = w.lastMode,
-               lqStage = (lqLevel and r.minRqly) and lqLevel(r.minRqly) or nil,
                rangeStage = r.maxStage or 0 }   -- highest warning stage of the flight (link core)
   end
   v.batt, v.gps, v.link = v.batt or old.batt, v.gps or old.gps, v.link or old.link
@@ -847,17 +854,54 @@ local function readTimer(w)
   if t and t.mode ~= 0 then w.timerS = t.value end
 end
 
+-- Colour levels (0 ok, 1 warning, 2 critical) for every page, all from the
+-- cores' level functions: the widget only maps level and size to a colour.
+-- Runs on the cores' views and the demo's alike. FLIGHT TIME on the post-flight
+-- page takes the level of the time it shows (timeS, Timer 1 in seconds).
+-- Each level guarded on its own: a failing level function leaves only that
+-- value without a level (neutral colour), the others are still set.
+local function lv(f, ...)
+  if not f then return nil end
+  local ok, v = pcall(f, ...)
+  if ok then return v end
+end
+function M.addLevels(w)
+  local lipo, gps, link = w.mods.lipo or {}, w.mods.gps or {}, w.mods.link or {}
+  w.timerLevel = lv(lipo.timerLevel, w.timerS)
+  for _, v in ipairs({ w.pre or false, w.flight or false }) do
+    local b, g, l = v and v.batt, v and v.gps, v and v.link
+    if b and not b.packs then
+      b.level = lv(lipo.restLevel, b.pct, b.warn, b.crit)
+      b.vLevel = lv(lipo.cellLevel, b.chem, b.cell)
+    end
+    if g then
+      g.satsLevel, g.satsBars = lv(gps.satsLevel, g.sats, g.fixLost), lv(gps.satsBars, g.sats)
+      g.fixLevel = lv(gps.fixLevel, g.fix)
+      g.altLevel, g.distLevel = lv(gps.limitLevel, g.altOver or false), lv(gps.limitLevel, g.distOver or false)
+    end
+    if l then l.rssiLevel, l.lqStage = lv(link.rssiLevel, l.stage), l.lq and lv(link.lqLevel, l.lq) or nil end
+  end
+  local p = w.post
+  if p then
+    local b, g, l = p.batt, p.gps, p.link
+    p.timeLevel = lv(lipo.timerLevel, p.timeS) or 0
+    if b then
+      b.level = lv(lipo.restLevel, b.left, b.warn, b.crit)
+      b.lastVLevel = lv(lipo.lastVoltageLevel, b.chem, b.cell)
+    end
+    if g then g.altLevel, g.distLevel = lv(gps.limitLevel, g.altExceeded), lv(gps.limitLevel, g.distExceeded) end
+    if l then l.lqStage = l.minLq and lv(link.lqLevel, l.minLq) or nil end
+  end
+  if w.search then w.search.satsLevel = lv(gps.satsLevel, w.search.sats) end
+end
+
 -- Page data from the demo: ("flight", view), ("pre", preflight data), ("post", summary) or ("search", position source).
 local function updateDemo(w, now)
   w.search, w.flight, w.pre, w.post = nil, nil, nil, nil
   local kind, data
   -- DEMO may name the page ("flight", "search"); true takes the demo's default.
   if w.demo then kind, data = w.demo(w, now, M, type(M.DEMO) == "string" and M.DEMO or nil) end
-  local lqLevel = w.mods.link and w.mods.link.lqLevel
-  if kind == "flight" then
-    if lqLevel then data.link.lqStage = lqLevel(data.link.lq) end
-    w.flight = data
-  end
+  if kind == "flight" then w.flight = data end
   if kind == "post" then w.post = data end
   if kind == "pre" then
     w.pre = data
@@ -1078,6 +1122,7 @@ function M.tick(w, on)
       clearQr(w)
     end
   end
+  pcall(M.addLevels, w)
   w.setupErrors = M.setupErrors(w, on)
   if not w.appErrAt or now - w.appErrAt >= 100 then   -- setup changes slowly: once a second
     local appOk, appErr = pcall(appSetupError, w, on)

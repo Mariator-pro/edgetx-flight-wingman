@@ -782,6 +782,31 @@ function M.dopStage(dop, kind)
   return (dop < s.fair) and 1 or 2
 end
 
+-- Sats needed for signal bar 1..5, and the bars a count reaches.
+M.SATS_BAR_MIN = { 4, 6, 10, 15, 20 }
+function M.satsBars(sats)
+  local n = 0
+  for i, min in ipairs(M.SATS_BAR_MIN) do if (sats or 0) >= min then n = i end end
+  return n
+end
+
+-- Sats level for displays: 2 at <= 1 bar or a (debounced) fix loss, 1 at 2 bars,
+-- 0 from 3 bars; nil without a count.
+function M.satsLevel(sats, fixLost)
+  if fixLost then return 2 end
+  if not sats then return nil end
+  local n = M.satsBars(sats)
+  return (n <= 1 and 2) or (n == 2 and 1) or 0
+end
+
+-- Fix type level: "3D" 0, "2D" 1, "NONE" 2; nil for an unknown type.
+local FIX_LEVEL = { ["3D"] = 0, ["2D"] = 1, NONE = 2 }
+function M.fixLevel(fix) return FIX_LEVEL[fix] end
+
+-- Level of an altitude / distance against its Max limit: critical (2) when over
+-- it (live view: altOver / distOver; end page: altExceeded / distExceeded), else 0.
+function M.limitLevel(exceeded) return exceeded and 2 or 0 end
+
 -- Preflight check of the GPS: fix "nofix" / "settling" / "ready" as status
 -- text and level (0 ok, 1 warning), plus the DOP stage. Met with both at 0.
 local GPS_STATUS = { nofix = { "NO FIX", 1 }, settling = { "FIX SETTLING", 1 }, ready = { "GPS READY", 0 } }
@@ -1090,6 +1115,8 @@ function M.resetFlight(state)
   state.maxGspd          = nil   -- the core
   state.altWarned        = false -- max-altitude announcement made, re-armed below MAX_ALT - MAX_ALT_HYST
   state.distWarned       = false -- max-distance announcement made, re-armed below MAX_DIST - MAX_DIST_HYST
+  state.altExceeded      = false -- max altitude / distance passed at least once this flight
+  state.distExceeded     = false
   -- last valid telemetry holds (also the frozen ENDED position)
   state.lastLat  = nil
   state.lastLon  = nil
@@ -1220,6 +1247,7 @@ function M.evaluate(state, snap, now)
     if phase == "ENDED" then
       result.flownM, result.maxDistM, result.track = state.flownM, state.maxDistM, state.track
       result.maxAlt, result.maxGspd  = state.maxAlt, state.maxGspd
+      result.altExceeded, result.distExceeded = state.altExceeded, state.distExceeded
     end
     return result
   end
@@ -1422,7 +1450,7 @@ function M.evaluate(state, snap, now)
     -- Max altitude: one announcement per climb above the limit.
     if P.MAX_ALT > 0 and alt then
       if not state.altWarned and alt > P.MAX_ALT then
-        state.altWarned = true
+        state.altWarned, state.altExceeded = true, true
         result.altEvent = true   -- one-shot for the sound
       elseif state.altWarned and alt < P.MAX_ALT - P.MAX_ALT_HYST then
         state.altWarned = false
@@ -1432,7 +1460,7 @@ function M.evaluate(state, snap, now)
     if P.MAX_DIST > 0 and d then
       local du = P.UNITS == "imperial" and d * 3.28084 or d
       if not state.distWarned and du > P.MAX_DIST then
-        state.distWarned = true
+        state.distWarned, state.distExceeded = true, true
         result.distEvent = true
       elseif state.distWarned and du < P.MAX_DIST - P.MAX_DIST_HYST then
         state.distWarned = false
@@ -1453,6 +1481,8 @@ function M.evaluate(state, snap, now)
   result.maxGspd           = state.maxGspd
   result.altOver           = P.MAX_ALT > 0 and state.altWarned    -- over the limit (until the hysteresis)
   result.distOver          = P.MAX_DIST > 0 and state.distWarned
+  result.altExceeded       = state.altExceeded    -- this flight's maxima passed the limit
+  result.distExceeded      = state.distExceeded
   result.fixLost           = state.fixLost   -- persistent flag: widget colours sats red
   result.alert             = snap.alert      -- "RTH" / "FS" from the FC, nil otherwise
   result.sensorMissing = snap.sensorMissing

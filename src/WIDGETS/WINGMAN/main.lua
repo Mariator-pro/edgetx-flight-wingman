@@ -485,16 +485,11 @@ local FONTS_LRG = { hero = DBLSIZE, unit = MIDSIZE, cap = SMLSIZE, label = TINSI
 local FONTS_STD = { hero = DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
                     value = SMLSIZE, side = 0, title = SMLSIZE, stage = SMLSIZE, ready = MIDSIZE }
 local STAGE_COL = { [1] = WARN_COL, [2] = CRIT_COL }
--- Level colour: 0 green (accent), 1 yellow, 2 red.
-local function levelCol(lvl) return STAGE_COL[lvl] or COLORS.accent end
-local SAT_STEPS = { 4, 6, 10, 15, 20 }   -- sats needed for bar 1..5 (as GPS Homer)
+-- Colour from a core's level (0 ok, 1 warning, 2 critical): big values and
+-- status green, yellow or red; small values text colour, yellow or red.
+local function levelCol(lvl) return (lvl == nil) and COLORS.fg or STAGE_COL[lvl] or COLORS.accent end   -- no level: neutral
+local function smallCol(lvl) return STAGE_COL[lvl] or COLORS.fg end
 local SAT_BAR_H = { 8, 14, 20, 26, 32 }
-
-local function satBars(sats)
-  local n = 0
-  for i, m in ipairs(SAT_STEPS) do if (sats or 0) >= m then n = i end end
-  return n
-end
 
 -- Layout context: x from the 800 px design, y from the 418 px body, sizes by the smaller factor.
 local function flightLayout(z)
@@ -617,7 +612,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     local cells = {
       { "SIGNAL ", v.signal and (sigNum .. " dBm") or sigNum },
       { "ALT ", fmt("%d " .. U.len, v.alt) },
-      { "SATS ", v.sats and tostring(v.sats) or "--" },
+      { "SATS ", v.sats and tostring(v.sats) or "--", smallCol(v.satsLevel) },
     }
     local used = 0
     for _, c in ipairs(cells) do used = used + textW(c[1], SMLSIZE) + textW(c[2], SMLSIZE) end
@@ -626,7 +621,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
     for _, c in ipairs(cells) do
       dtext(cx, y, c[1], COLORS.muted, SMLSIZE)
       cx = cx + textW(c[1], SMLSIZE)
-      dtext(cx, y, c[2], COLORS.fg, SMLSIZE)
+      dtext(cx, y, c[2], c[3] or COLORS.fg, SMLSIZE)
       cx = cx + textW(c[2], SMLSIZE) + spread
     end
     y = y + fh + p
@@ -741,10 +736,11 @@ end
 
 -- RSSI of both antennas, the inactive one grey. One value without a second antenna.
 local function drawRssi(L, x, y, l)
-  if not l.rss2 then btext(x, y, fmt("%d", l.rssi), COLORS.fg, L.f.value) return end
+  local col = smallCol(l.rssiLevel)
+  if not l.rss2 then btext(x, y, fmt("%d", l.rssi), col, L.f.value) return end
   for i, v in ipairs({ l.rss1, l.rss2 }) do
     local text = fmt("%d", v)
-    btext(x, y, text, (l.ant and l.ant ~= i) and COLORS.muted or COLORS.fg, L.f.value)
+    btext(x, y, text, (l.ant and l.ant ~= i) and COLORS.muted or col, L.f.value)
     x = x + textW(text, L.f.value)
     if i == 1 then btext(x, y, " / ", COLORS.fg, L.f.value); x = x + textW(" / ", L.f.value) end
   end
@@ -762,21 +758,15 @@ local function drawGrid(L, x, w, cells)
   end
 end
 
-local function stageOf(pct, warn, crit)
-  if not pct then return 0 end
-  if pct <= crit then return 2 end
-  if pct <= warn then return 1 end
-  return 0
-end
-
--- Battery bar with the warning and critical marks, their labels above and below.
-local function drawBattBar(L, x, w, b, col)
-  local by, bh, r = L.y(BAR_TOP), L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
+-- Bar filled to pct with threshold marks { pct, colour }; by (optional) its top in px.
+local function drawBar(L, x, w, pct, col, marks, by)
+  local bh, r = L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
+  by = by or L.y(BAR_TOP)
   fillRounded(x, by, w, bh, r, COLORS.track)
-  local fw = math.floor(w * math.max(0, math.min(100, b.pct or 0)) / 100)
+  local fw = math.floor(w * math.max(0, math.min(100, pct or 0)) / 100)
   fillBar(x, by, fw, bh, r, col)
   local t = L.s(4)
-  for _, m in ipairs({ { b.warn, WARN_COL }, { b.crit, CRIT_COL } }) do
+  for _, m in ipairs(marks) do
     lcd.drawFilledRectangle(x + math.floor(w * m[1] / 100), by - t, L.s(3), bh + 2 * t, m[2])
   end
 end
@@ -811,20 +801,20 @@ local function drawStage(L, x, right, stage, y)
   dtext(wx + pad, wy, word, (stage == 2) and WHITE or DARK_TEXT, f)
 end
 
-local function drawBattery(L, x, w, b, sideLabel, sideValue)
+local function drawBattery(L, x, w, b, sideLabel, sideValue, sideCol)
   local right = x + w
-  local stage = stageOf(b.pct, b.warn, b.crit)
-  local col = STAGE_COL[stage] or COLORS.accent
-  local hot = b.vLevel and levelCol(b.vLevel)   -- voltage coloured as on Lipo Nanny (per-cell thresholds)
+  local stage = b.level or 0
+  local col = levelCol(stage)
+  local hot = smallCol(b.vLevel)   -- per-cell voltage against the chemistry
   drawTitle(L, x, packTitle(L, w, b.name, b.nameShort))
   drawHero(L, x, right, fmt("%d", b.pct), "%", col, "REMAINING",
-           sideValue and sideLabel, sideValue)
+           sideValue and sideLabel, sideValue, sideCol)
   if b.pct then drawStage(L, right, true, stage, STAGE_FIELD_Y) end
-  drawBattBar(L, x, w, b, col)
+  drawBar(L, x, w, b.pct, col, { { b.warn, WARN_COL }, { b.crit, CRIT_COL } })
   drawGrid(L, x, w, {
-    { "VOLTAGE", fmt("%.1f V", b.volt), hot },
+    { "PACK", fmt("%.1f V", b.volt), hot },
     { "PER CELL", fmt("%.2f V", b.cell), hot },
-    { "LEFT", fmtMah(b.left) },
+    { "LEFT", fmtMah(b.left), smallCol(b.level) },
     { "USED", fmtMah(b.used) },
     { "CURRENT", fmtAmps(b.amps) },   -- capacity is in the title
   })
@@ -875,7 +865,7 @@ local function drawLink(L, x, w, l, linkUp)
   drawStage(L, right, true, l.stage, STAGE_FIELD_Y)
 
   drawGrid(L, x, w, {
-    { "LQ", fmt("%d %%", l.lq), l.lqStage and levelCol(l.lqStage) },
+    { "LQ", fmt("%d %%", l.lq), smallCol(l.lqStage) },
     { "RSSI dBm", l, nil, drawRssi },
     { "RSNR", fmt("%d dB", l.rsnr) },
     { txLabel(l), fmt("%d mW", l.tpwr) },
@@ -1186,22 +1176,24 @@ end
 -- right only the width.
 function HZ.rssi(L, right, y, l)
   local f = L.f.value
-  local parts = l.rss2 and { { fmt("%d", l.rss1), 1 }, { " / " }, { fmt("%d", l.rss2), 2 } } or { { fmt("%d", l.rssi) } }
+  local parts = l.rss2 and { { fmt("%d", l.rss1), 1 }, { " / ", sep = true }, { fmt("%d", l.rss2), 2 } } or { { fmt("%d", l.rssi) } }
   local w = 0
   for _, p in ipairs(parts) do w = w + textW(p[1], f) end
   if not right then return w end
   local x = right - w
   for _, p in ipairs(parts) do
-    btext(x, y, p[1], (p[2] and l.ant and l.ant ~= p[2]) and COLORS.muted or COLORS.fg, f)
+    -- the separator in text colour as in drawRssi
+    local col = p.sep and COLORS.fg or (p[2] and l.ant and l.ant ~= p[2]) and COLORS.muted or smallCol(l.rssiLevel)
+    btext(x, y, p[1], col, f)
     x = x + textW(p[1], f)
   end
 end
 
-function HZ.battery(L, z, b, sideCap, sideValue)
+function HZ.battery(L, z, b, sideCap, sideValue, sideCol)
   local x, bw, r = L.x(18), L.s(HZ.BAR_W), L.s(6)
   local top, bottom = L.y(HZ.BAR_TOP), L.y(HZ.BAR_BOTTOM)
-  local stage = stageOf(b.pct, b.warn, b.crit)
-  local col = STAGE_COL[stage] or COLORS.accent
+  local stage = b.level or 0
+  local col = levelCol(stage)
   drawTitle(L, x, packTitle(L, L.x(HZ.X0) - x, b.name, b.nameShort))
   fillRounded(x, top, bw, bottom - top, r, COLORS.track)
   HZ.vfill(x, bottom, bw, math.floor((bottom - top) * math.max(0, math.min(100, b.pct or 0)) / 100), r, col)
@@ -1210,13 +1202,13 @@ function HZ.battery(L, z, b, sideCap, sideValue)
   end
   local tx = x + bw + L.s(14)
   HZ.hero(L, tx, false, fmt("%d", b.pct), "%", col, "REMAINING")
-  if sideValue then HZ.side(L, tx, false, sideCap, sideValue) end   -- none while Timer 1 is off
+  if sideValue then HZ.side(L, tx, false, sideCap, sideValue, sideCol) end   -- none while Timer 1 is off
   if b.pct then drawStage(L, tx, false, stage, HZ.STAGE_Y) end
-  local hot = b.vLevel and levelCol(b.vLevel)
+  local hot = smallCol(b.vLevel)
   HZ.rows(L, x, L.x(HZ.X0) - L.x(26), {
-    { "VOLTAGE", fmt("%.1f V", b.volt), hot },
+    { "PACK", fmt("%.1f V", b.volt), hot },
     { "PER CELL", fmt("%.2f V", b.cell), hot },
-    { "LEFT", fmtMah(b.left) },
+    { "LEFT", fmtMah(b.left), smallCol(b.level) },
     { "USED", fmtMah(b.used) },
     { "CURRENT", fmtAmps(b.amps) },
   })
@@ -1250,7 +1242,7 @@ function HZ.link(L, z, l, linkUp)
   HZ.side(L, inner, true, modeCap, modeVal)
   drawStage(L, inner, true, l.stage, HZ.STAGE_Y)
   HZ.rows(L, L.x(HZ.X1) + L.x(26), right, {
-    { "LQ", fmt("%d %%", l.lq), l.lqStage and levelCol(l.lqStage) },
+    { "LQ", fmt("%d %%", l.lq), smallCol(l.lqStage) },
     { "RSSI dBm", l, nil, HZ.rssi, "RSSI" },
     { "RSNR", fmt("%d dB", l.rsnr) },
     { txLabel(l), fmt("%d mW", l.tpwr), nil, nil, l.pwrTag and ("TX PWR (" .. l.pwrTag .. ")") or "TX PWR",
@@ -1260,10 +1252,9 @@ end
 
 -- Satellites centred over the middle: number, caption and five bars (as on the
 -- compass page) as one group.
-function HZ.sats(L, sats)
-  local n = satBars(sats)
-  local satCol = (n <= 1) and CRIT_COL or ((n == 2) and WARN_COL or COLORS.accent)
-  local num, bw, bg = fmt("%d", sats), L.s(8), L.s(3)
+function HZ.sats(L, g)
+  local n, satCol = g.satsBars or 0, levelCol(g.satsLevel)
+  local num, bw, bg = fmt("%d", g.sats), L.s(8), L.s(3)
   local gw = textW(num, L.hero) + L.s(14) + 5 * bw + 4 * bg
   local x = L.x(400) - math.floor(gw / 2)
   drawTitle(L, x, "GPS")
@@ -1310,7 +1301,7 @@ function HZ.middle(L, g, ctx)
   local hide = hx and { hx - hs - L.s(2), hy, hx + hs + L.s(2), hy + 2 * hs }
   local top0 = top + L.s(HZ.BAND_BASE + 4)
   HZ.tape(L, x, top, tw, h, g.gspd, false, "SPD", 0, nil, top0, hide)   -- tapes always, "--" without a value
-  HZ.tape(L, x + w - tw, top, tw, h, g.alt, true, "ALT", nil, g.altOver and CRIT_COL, top0, hide,
+  HZ.tape(L, x + w - tw, top, tw, h, g.alt, true, "ALT", nil, STAGE_COL[g.altLevel], top0, hide,
           sm.vs and fh + L.s(3))   -- red over Max altitude; room for the vertical speed
   if sm.vs then HZ.vario(L, x + w - tw, top, tw, h, sm.vs) end
   HZ.band(L, x, top, w, sm.course, rel)
@@ -1324,7 +1315,7 @@ function HZ.middle(L, g, ctx)
   local hs = math.floor(fh * 0.4)
   local text = lb and (lb.text .. "  ") or ""
   local dist = distText(g.dist)   -- km from 1000 m, mi from 5280 ft
-  local px = HZ.pill(L, cx, py, text, HZ.WHITE, 2 * hs + L.s(8), dist, g.distOver and CRIT_COL)   -- distance red over Max distance
+  local px = HZ.pill(L, cx, py, text, HZ.WHITE, 2 * hs + L.s(8), dist, STAGE_COL[g.distLevel])   -- distance red over Max distance
   HZ.house(px + hs, py + math.floor((fh - 1.8 * hs) / 2), hs)
 end
 
@@ -1336,18 +1327,18 @@ function HZ.page(ctx, L, z, v)
     if w.flightTime == "timeleft" then
       HZ.battery(L, z, v.batt, "TIME LEFT", v.batt.timeLeft)
     else
-      HZ.battery(L, z, v.batt, "TIMER", w.timerS and fmtTimer(w.timerS))
+      HZ.battery(L, z, v.batt, "TIMER", w.timerS and fmtTimer(w.timerS), smallCol(w.timerLevel))
     end
   end
-  HZ.sats(L, v.gps.sats)
+  HZ.sats(L, v.gps)
   HZ.middle(L, v.gps, ctx)
   if v.link and on.link ~= false then HZ.link(L, z, v.link, w.linkUp) end
 end
 
 -- Satellites as the big value, five bars on the right (stages as GPS Homer).
-local function drawSats(L, x, right, sats)
-  local n = satBars(sats)
-  local satCol = (n <= 1) and CRIT_COL or ((n == 2) and WARN_COL or COLORS.accent)
+local function drawSats(L, x, right, g)
+  local n, sats = g.satsBars or 0, g.sats
+  local satCol = levelCol(g.satsLevel)
   drawHero(L, x, right, fmt("%d", sats), nil, satCol, "SATS")
   local bw, bg = L.s(8), L.s(3)
   local bx = right - 5 * bw - 4 * bg
@@ -1360,7 +1351,7 @@ end
 local function drawGps(L, x, w, g, alert, ctx)
   local right = x + w
   drawTitle(L, x, "GPS")
-  drawSats(L, x, right, g.sats)
+  drawSats(L, x, right, g)
 
   -- Compass and the line under it as on GPS Homer (shared compass.lua): what to
   -- show and the text; course and rel smoothed per widget.
@@ -1393,8 +1384,8 @@ local function drawGps(L, x, w, g, alert, ctx)
   end
 
   local half = math.floor(w / 2)
-  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d " .. U.len, g.alt), g.altOver and CRIT_COL)
-  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d " .. U.len, g.dist and g.dist * U.f), g.distOver and CRIT_COL)
+  drawCell(L, x, GRID_TOP + 2 * GRID_PITCH, "ALT", fmt("%d " .. U.len, g.alt), STAGE_COL[g.altLevel])
+  drawCell(L, x + half, GRID_TOP + 2 * GRID_PITCH, "DIST", fmt("%d " .. U.len, g.dist and g.dist * U.f), STAGE_COL[g.distLevel])
 end
 
 -- Column lines from top (default: under the header) down to bottom. All three
@@ -1438,7 +1429,7 @@ local function drawFlight(ctx)
     if ctx.w.flightTime == "timeleft" then
       drawBattery(L, c[1], c[2], v.batt, "TIME LEFT", v.batt.timeLeft)
     else
-      drawBattery(L, c[1], c[2], v.batt, "TIMER", ctx.w.timerS and fmtTimer(ctx.w.timerS))
+      drawBattery(L, c[1], c[2], v.batt, "TIMER", ctx.w.timerS and fmtTimer(ctx.w.timerS), smallCol(ctx.w.timerLevel))
     end
   end
   if v.gps and c[3] then drawGps(L, c[3], c[4], v.gps, ctx.w.alert, ctx) end
@@ -1452,7 +1443,6 @@ end
 -- ---------------------------------------------------------------------------
 local PRE_COLS_H = 300
 local STATUS_Y   = 282   -- status line baseline (design y)
-local PRE_ROW0   = 150   -- label and value cells below the big value
 local PACK_TOP, PACK_ROW_H = 50, 36
 local READY_W, READY_H = 190, 76
 local CONFIRM_FILL_OPACITY = 8   -- confirm hold bar behind the selected pack
@@ -1468,11 +1458,36 @@ local function drawStatus(L, x, st)
   btext(x + d + L.s(8), base, st.text, col, font)
 end
 
+-- Bar and cells spread with equal gaps between the big value's caption and the
+-- status line: bar top, cell label baseline and label-to-value pitch in px.
+local function preRows(L)
+  local top = L.y(HERO_Y + 29)
+  local bottom = L.y(STATUS_Y) - math.floor(fontH(L.f.value) * (BASELINE - CAP_TOP) + 0.5)
+  local bh = L.y(BAR_BOTTOM) - L.y(BAR_TOP)
+  local capH = math.floor(fontH(L.f.label) * CAP_H + 0.5)
+  local pitch = L.y(36) - L.y(10)   -- label to value baseline, as drawCell
+  local gap = math.floor((bottom - top - bh - capH - pitch) / 3)
+  return top + gap, top + 2 * gap + bh + capH, pitch
+end
+
+-- Two cells { label, value, col, draw } (as drawCell) on the preflight cell row.
+local function drawPreCells(L, x, w, cells)
+  local _, base, pitch = preRows(L)
+  for i, c in ipairs(cells) do
+    local cx = x + (i - 1) * math.floor(w / 2)
+    btext(cx, base, c[1], COLORS.muted, L.f.label)
+    if c[4] then c[4](L, cx, base + pitch, c[2]) else btext(cx, base + pitch, c[2], c[3] or COLORS.fg, L.f.value) end
+  end
+end
+
 local function drawPreBattery(L, x, w, b, st)
   local col = levelCol(st.batt.level)
   drawTitle(L, x, packTitle(L, w, b.name, b.nameShort))
-  drawHero(L, x, x + w, fmt("%.2f", b.cell), "V", col, "PER CELL", "TOTAL", fmt("%.1f V", b.volt), col)
-  drawBattBar(L, x, w, b, col)
+  local small = smallCol(b.level)
+  -- PER CELL and PACK by the cell voltage as on the flight page; bar, cells and status by the rest
+  drawHero(L, x, x + w, fmt("%.2f", b.cell), "V", levelCol(b.vLevel), "PER CELL", "PACK", fmt("%.1f V", b.volt), smallCol(b.vLevel))
+  drawBar(L, x, w, b.pct, col, { { b.warn, WARN_COL }, { b.crit, CRIT_COL } }, preRows(L))
+  drawPreCells(L, x, w, { { "REMAINING", fmt("%d %%", b.pct), small }, { "LEFT", fmtMah(b.left), small } })
   drawStatus(L, x, st.batt)
 end
 
@@ -1551,11 +1566,9 @@ end
 
 local function drawPreGps(L, x, w, g, st)
   drawTitle(L, x, "GPS")
-  drawSats(L, x, x + w, g.sats)
-  local half = math.floor(w / 2)
-  drawCell(L, x, PRE_ROW0, g.dopKind or "PDOP", g.dop and string.format("%.1f", g.dop) or "--",
-           g.dop and levelCol(st.dopStage))
-  drawCell(L, x + half, PRE_ROW0, "FIX", g.fix or "--")
+  drawSats(L, x, x + w, g)
+  drawPreCells(L, x, w, { { g.dopKind or "PDOP", g.dop and string.format("%.1f", g.dop) or "--",
+                            g.dop and smallCol(st.dopStage) }, { "FIX", g.fix or "--", smallCol(g.fixLevel) } })
   drawStatus(L, x, st.gps)
 end
 
@@ -1564,10 +1577,11 @@ local function drawPreLink(L, x, w, l, st, linkUp)
   drawTitle(L, x, l.modLine)
   if linkUp then drawHeartbeat(right - HEARTBEAT_R, L.y(21) + math.floor(L.s(11) / 2)) end
   local modeCap, modeVal = modeParts(l.mode)
-  drawHero(L, x, right, fmt("%d", l.lq), "%", st.lqLevel and levelCol(st.lqLevel) or COLORS.fg, "LQ", modeCap, modeVal)
-  local half = math.floor(w / 2)
-  drawCell(L, x, PRE_ROW0, "RSSI dBm", l, nil, drawRssi)
-  drawCell(L, x + half, PRE_ROW0, txLabel(l), fmt("%d mW", l.tpwr))
+  local col = st.lqLevel and levelCol(st.lqLevel) or COLORS.fg
+  drawHero(L, x, right, fmt("%d", l.lq), "%", col, "LQ", modeCap, modeVal)
+  -- red mark at the link core's stage 2 LQ limit
+  drawBar(L, x, w, l.lq, col, l.lqCrit and { { l.lqCrit, CRIT_COL } } or {}, preRows(L))
+  drawPreCells(L, x, w, { { "RSSI dBm", l, nil, drawRssi }, { txLabel(l), fmt("%d mW", l.tpwr) } })
   drawStatus(L, x, st.link)
 end
 
@@ -1686,12 +1700,11 @@ end
 local function drawPostColumns(L, c, p)
   local b, g, l = p.batt, p.gps, p.link
   if b and c[1] then
-    local stage = stageOf(b.left, b.warn, b.crit)
     drawTitle(L, c[1], packTitle(L, c[2], b.name, b.nameShort), POST_KPI_H)
-    local lastV = b.volt and (fmt("%.1f V", b.volt) .. "  " .. fmt("%.2f V/c", b.cell)) or "--"
+    local lastV = b.cell and fmt("%.2f V", b.cell) or "--"
     drawRows(L, c[1], c[2], {
-      { "CHARGE", fmt("%d %%", b.left), STAGE_COL[stage], fmt("%d %%", b.start) .. " -> " },
-      { { "LAST VOLTAGE", "LAST V" }, lastV },
+      { "CHARGE", fmt("%d %%", b.left), smallCol(b.level), fmt("%d %%", b.start) .. " -> " },
+      { { "LAST PER CELL", "LAST CELL" }, lastV, smallCol(b.lastVLevel) },
       { { "MAX CURRENT", "MAX CURR" }, fmtAmps(b.maxA) },
       { "PACK CYCLES", b.cycles or "--" },
     })
@@ -1700,8 +1713,8 @@ local function drawPostColumns(L, c, p)
     drawTitle(L, c[3], "GPS", POST_KPI_H)
     local co = g.coord or function(v) return string.format("%.5f", v) end
     drawRows(L, c[3], c[4], {
-      { { "MAX DISTANCE", "MAX DIST" }, distText(g.maxDist) },
-      { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d " .. U.len, g.maxAlt) },
+      { { "MAX DISTANCE", "MAX DIST" }, distText(g.maxDist), smallCol(g.distLevel) },
+      { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d " .. U.len, g.maxAlt), smallCol(g.altLevel) },
       { { "MAX SPEED", "MAX SPD" }, fmt("%d " .. U.spd, g.maxSpd) },
       { { "LAST POSITION", "LAST POS" }, g.lat and co(g.lat) or "--" },
       { "", g.lon and co(g.lon) or "" },
@@ -1710,8 +1723,8 @@ local function drawPostColumns(L, c, p)
   if l and c[5] then
     drawTitle(L, c[5], l.modLine, POST_KPI_H)
     drawRows(L, c[5], c[6], {
-      { { "LOW LINK QUALITY", "LOW LQ" }, fmt("%d %%", l.minLq), l.lqStage and levelCol(l.lqStage) },
-      { "MAX RANGELIMIT", fmt("%d %%", l.maxRange), l.rangeStage and levelCol(l.rangeStage) },
+      { { "LOW LINK QUALITY", "LOW LQ" }, fmt("%d %%", l.minLq), smallCol(l.lqStage) },
+      { "MAX RANGELIMIT", fmt("%d %%", l.maxRange), smallCol(l.rangeStage) },
       { { "MAX TX POWER", "MAX TX PWR" }, fmt("%d mW", l.maxTpwr) },
       { "RF MODE", l.mode or "--" },
     })
@@ -1752,9 +1765,10 @@ local function drawPost(ctx)
   local L = flightLayout(z)
   local b, g = p.batt or {}, p.gps or {}
   local third = math.floor(z.w / 3)
-  drawKpi(L, math.floor(third / 2), "FLIGHT TIME", p.time or "--")
+  -- key figures: text colour, yellow or red only on a problem
+  drawKpi(L, math.floor(third / 2), "FLIGHT TIME", p.time or "--", nil, smallCol(p.timeLevel))
   drawKpi(L, third + math.floor(third / 2), { "USED CAPACITY", "USED CAP" }, fmt("%d", b.used), "mAh",
-          STAGE_COL[stageOf(b.left, b.warn or 0, b.crit or 0)], third - L.s(16))
+          smallCol(b.level), third - L.s(16))
   drawKpi(L, 2 * third + math.floor(third / 2), "FLOWN", kmText(g.flown), U.bigU)
   local kpiB, colsB = L.y(POST_KPI_H), L.y(POST_COLS_B)
   lcd.drawFilledRectangle(0, kpiB, z.w, 1, COLORS.track)
