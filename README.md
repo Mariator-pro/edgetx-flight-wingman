@@ -19,6 +19,7 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 - [🎯 What is it for?](#-what-is-it-for)
 - [🧰 Requirements](#-requirements)
 - [📥 Installation](#-installation)
+- [⚙️ Customizing](#️-customizing)
 - [🛠️ Troubleshooting](#️-troubleshooting)
 - [🤝 Contributing](#-contributing)
 - [⚠️ Disclaimer](#️-disclaimer)
@@ -170,6 +171,12 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 - **Close the search page:** aileron held right for 1 s.
 - **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
 - **Show the last post-flight page again:** on the waiting page, aileron held left for 1 s.
+
+---
+
+## ⚙️ Customizing
+
+All settings are made in **Flight Bag**, the settings tool shared by Lipo Nanny, Link Sentinel, GPS Homer and Flight Wingman (**SYS → Tools → Apps → Flight Bag**). Thresholds, sounds, vibration and display options are set there; after **Save** they apply within a few seconds, no restart needed. Every page and row is described in the [Flight Bag guide](https://github.com/Mariator-pro/edgetx-flight-wingman/blob/main/docs/flightbag.md).
 
 ---
 
