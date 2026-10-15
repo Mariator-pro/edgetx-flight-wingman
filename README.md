@@ -86,6 +86,8 @@ Besides the two flight views above, the widget shows a page for each other phase
   </tr>
 </table>
 
+See the pages in motion, from the ready check to warnings and the search for a crashed model: [Flight Wingman in action](docs/in-action.md).
+
 The two fields in the header show the flight controller's state on every page:
 
 | Header field | Meaning |
