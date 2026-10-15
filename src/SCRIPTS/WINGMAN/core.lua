@@ -376,7 +376,6 @@ local function updatePhase(w, now)
     w.fcInfo = fcInfoText(w.msp)
     w.armReason = w.armBlocked and w.msp and w.msp.reason or nil
   end
-  w.armed = armed
   local phase, event = flightPhase(w.fs, up, armed, w.preReady, now * 10)
   if event == "end" or event == "lost" then
     w.mode, w.alert, w.armBlocked = nil, nil, nil
@@ -390,6 +389,9 @@ local function updatePhase(w, now)
   if event == "resume" then w.resumed = true end
   w.phase = phase
   w.connected = phase == M.PRE or phase == M.FLIGHT   -- link up, short gaps included
+  -- A short dropout keeps the last armed state like every other value: no false
+  -- disarm (that would open the search page far out before the end page).
+  if up or not w.connected then w.armed = armed end
 end
 
 -- Preflight page: status line per column ({ text, level }, level 0 ok, 1
@@ -876,6 +878,7 @@ function M.addLevels(w)
     end
     if g then
       g.satsLevel, g.satsBars = lv(gps.satsLevel, g.sats, g.fixLost), lv(gps.satsBars, g.sats)
+      g.satsBarsMax = gps.SATS_BAR_MIN and #gps.SATS_BAR_MIN   -- bars to draw, one per threshold
       g.fixLevel = lv(gps.fixLevel, g.fix)
       g.altLevel, g.distLevel = lv(gps.limitLevel, g.altOver or false), lv(gps.limitLevel, g.distOver or false)
     end
@@ -1089,16 +1092,6 @@ function M.tick(w, on)
   if drive and on.link and w.link then
     ok, w.linkRes = pcall(w.mods.link.update, w.link)
     if not ok then w.linkRes = nil end
-    -- Like link-sentinel's widget: a dropout shorter than the core's grace keeps
-    -- the last running result, so the link column holds like battery and GPS.
-    local r = w.linkRes
-    if r and r.status == "running" then
-      w.lastLinkRun = r
-    elseif r and r.status == "no_link" and not r.linkLost and w.lastLinkRun then
-      w.linkRes = w.lastLinkRun
-    else
-      w.lastLinkRun = nil
-    end
   end
   w.gpsRes = nil
   if drive and on.gps and w.gps then

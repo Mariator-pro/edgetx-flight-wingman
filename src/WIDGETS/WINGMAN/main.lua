@@ -489,7 +489,6 @@ local STAGE_COL = { [1] = WARN_COL, [2] = CRIT_COL }
 -- status green, yellow or red; small values text colour, yellow or red.
 local function levelCol(lvl) return (lvl == nil) and COLORS.fg or STAGE_COL[lvl] or COLORS.accent end   -- no level: neutral
 local function smallCol(lvl) return STAGE_COL[lvl] or COLORS.fg end
-local SAT_BAR_H = { 8, 14, 20, 26, 32 }
 
 -- Layout context: x from the 800 px design, y from the 418 px body, sizes by the smaller factor.
 local function flightLayout(z)
@@ -706,6 +705,16 @@ end
 
 -- Big value with unit and caption below; side block (label over value) right-aligned.
 local HERO_Y = 98   -- big value baseline (design y), clear of the title
+-- Satellite bars on the big value's baseline: one per GPS-core threshold
+-- (satsBarsMax, 5 without it), 8 to 32 design px high, filled up to satsBars.
+local function satBarsW(g, bw, bg) return (g.satsBarsMax or 5) * (bw + bg) - bg end
+local function drawSatBars(L, x, g, bw, bg, col)
+  local n = g.satsBarsMax or 5
+  for i = 1, n do
+    local hh = L.s(8 + math.floor(24 * (i - 1) / math.max(n - 1, 1) + 0.5))
+    lcd.drawFilledRectangle(x + (i - 1) * (bw + bg), L.y(HERO_Y) - hh, bw, hh, (i <= (g.satsBars or 0)) and col or COLORS.track)
+  end
+end
 local function drawHero(L, x, right, num, unit, numCol, cap, sideLabel, sideValue, sideCol, keepDash)
   local base = L.y(HERO_Y)
   if num == "--" and not keepDash then numCol = COLORS.fg end   -- the unit too
@@ -1250,21 +1259,17 @@ function HZ.link(L, z, l, linkUp)
   })
 end
 
--- Satellites centred over the middle: number, caption and five bars (as on the
+-- Satellites centred over the middle: number, caption and the bars (as on the
 -- compass page) as one group.
 function HZ.sats(L, g)
-  local n, satCol = g.satsBars or 0, levelCol(g.satsLevel)
+  local satCol = levelCol(g.satsLevel)
   local num, bw, bg = fmt("%d", g.sats), L.s(8), L.s(3)
-  local gw = textW(num, L.hero) + L.s(14) + 5 * bw + 4 * bg
+  local gw = textW(num, L.hero) + L.s(14) + satBarsW(g, bw, bg)
   local x = L.x(400) - math.floor(gw / 2)
   drawTitle(L, x, "GPS")
   btext(x, L.y(HERO_Y), num, satCol, L.hero)
   btext(x, L.y(HERO_Y + 29), "SATS", COLORS.muted, L.f.cap)
-  local bx = x + textW(num, L.hero) + L.s(14)
-  for i, hh in ipairs(SAT_BAR_H) do
-    hh = L.s(hh)
-    lcd.drawFilledRectangle(bx + (i - 1) * (bw + bg), L.y(HERO_Y) - hh, bw, hh, (i <= n) and satCol or COLORS.track)
-  end
+  drawSatBars(L, x + textW(num, L.hero) + L.s(14), g, bw, bg, satCol)
 end
 
 -- Middle: horizon with tapes, the heading band over its full width at the top and at its bottom home
@@ -1335,17 +1340,12 @@ function HZ.page(ctx, L, z, v)
   if v.link and on.link ~= false then HZ.link(L, z, v.link, w.linkUp) end
 end
 
--- Satellites as the big value, five bars on the right (stages as GPS Homer).
+-- Satellites as the big value, the bars on the right (stages as GPS Homer).
 local function drawSats(L, x, right, g)
-  local n, sats = g.satsBars or 0, g.sats
   local satCol = levelCol(g.satsLevel)
-  drawHero(L, x, right, fmt("%d", sats), nil, satCol, "SATS")
+  drawHero(L, x, right, fmt("%d", g.sats), nil, satCol, "SATS")
   local bw, bg = L.s(8), L.s(3)
-  local bx = right - 5 * bw - 4 * bg
-  for i, h in ipairs(SAT_BAR_H) do
-    local hh = L.s(h)
-    lcd.drawFilledRectangle(bx + (i - 1) * (bw + bg), L.y(HERO_Y) - hh, bw, hh, (i <= n) and satCol or COLORS.track)
-  end
+  drawSatBars(L, right - satBarsW(g, bw, bg), g, bw, bg, satCol)
 end
 
 local function drawGps(L, x, w, g, alert, ctx)

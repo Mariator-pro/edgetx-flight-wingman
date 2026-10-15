@@ -1100,7 +1100,7 @@ function M.resetFlight(state)
   state.moveSince        = nil   -- movement timer for the lock
   state.lastArmed        = nil   -- last armed state (nil = not seen yet; no edge)
   state.preReady         = false -- preflight check met on the last tick (for flightPhase)
-  state.preHold          = nil   -- last online preflight values (sats, fixLost, DOP, fix)
+  state.live             = nil   -- last online result, held over a short dropout (holdLive)
   state.courseValid      = false -- debounced course validity (updateCourseValid)
   state.courseSince      = nil
   state.readyAnnounced   = false
@@ -1187,13 +1187,13 @@ local function preflightMet(r)
   return pf.level == 0 and pf.dopStage == 0
 end
 
--- End of an online tick: preflight check for flightPhase, and the preflight
--- values held for a dropout shorter than the link-loss time.
+-- End of an online tick: preflight check for flightPhase.
 local function finishLive(state, result)
   state.preReady = preflightMet(result)
-  state.preHold = { sats = result.sats, fixLost = result.fixLost, dop = result.dop,
-                    dopKind = result.dopKind, fix = result.fix }
 end
+
+-- Whole units, as the displays show them: Max altitude / distance compare these.
+local function round(v) return math.floor(v + 0.5) end
 
 function M.evaluate(state, snap, now)
   local P      = M.PARAMS
@@ -1237,11 +1237,6 @@ function M.evaluate(state, snap, now)
   -- ---- telemetry offline ----
   if not snap.telem then
     result.gpsState = gpsStateOf(state)
-    local hold = phase == "PRE" and state.preHold   -- dropout shorter than the link-loss time
-    if hold then
-      result.sats, result.fixLost, result.dop, result.dopKind, result.fix =
-        hold.sats, hold.fixLost, hold.dop, hold.dopKind, hold.fix
-    end
     result.lastLat  = state.lastLat
     result.lastLon  = state.lastLon
     if phase == "ENDED" then
@@ -1449,16 +1444,17 @@ function M.evaluate(state, snap, now)
     if g and (not state.maxGspd or g > state.maxGspd) then state.maxGspd = g end
     -- Max altitude: one announcement per climb above the limit.
     if P.MAX_ALT > 0 and alt then
-      if not state.altWarned and alt > P.MAX_ALT then
+      local a = round(alt)
+      if not state.altWarned and a > P.MAX_ALT then
         state.altWarned, state.altExceeded = true, true
         result.altEvent = true   -- one-shot for the sound
-      elseif state.altWarned and alt < P.MAX_ALT - P.MAX_ALT_HYST then
+      elseif state.altWarned and a < P.MAX_ALT - P.MAX_ALT_HYST then
         state.altWarned = false
       end
     end
     -- Max distance: the same, in display units (ft when imperial).
     if P.MAX_DIST > 0 and d then
-      local du = P.UNITS == "imperial" and d * 3.28084 or d
+      local du = round(P.UNITS == "imperial" and d * 3.28084 or d)
       if not state.distWarned and du > P.MAX_DIST then
         state.distWarned, state.distExceeded = true, true
         result.distEvent = true
@@ -1524,6 +1520,31 @@ local function announce(key)
   eventHaptic(key)
 end
 
+-- One-shot events of a result: a held result carries this cycle's, never the
+-- old ones again (holdLive).
+local ONE_SHOT = { readyEvent = true, homeSet = true, fixLostEvent = true, fixRecovered = true,
+                   altEvent = true, distEvent = true }
+
+-- Telemetry gap shorter than LINK_LOSS_T (phase still PRE or FLIGHT): the last
+-- online result stands (with its snapshot), so the preflight and flight page
+-- keep their values and colours until the end page; held = true marks it. Phase,
+-- linkUp (telemetry arriving right now: the heartbeat) and this cycle's one-shot
+-- events stay current.
+local function holdLive(state, result, up)
+  result.linkUp = up
+  if up then state.live = result; return result end
+  local live = state.live
+  if not live or not (result.phase == "PRE" or result.phase == "FLIGHT") then
+    state.live = nil
+    return result
+  end
+  local held = {}
+  for k, v in pairs(live) do held[k] = v end
+  for k in pairs(ONE_SHOT) do held[k] = result[k] end
+  held.phase, held.held, held.linkUp = result.phase, true, false
+  return held
+end
+
 function M.update(state, now)
   now = now or nowMs()
   M.pollConfig(now)
@@ -1540,7 +1561,7 @@ function M.update(state, now)
   if result.altEvent     then announce("alt"); wakeDisplay() end
   if result.distEvent    then announce("dist"); wakeDisplay() end
 
-  return result
+  return holdLive(state, result, snap.telem)
 end
 
 return M
