@@ -407,13 +407,14 @@ local function today()
 end
 -- file: the model the read started on (default the active one).
 local function storeModes(w, entry, file)
-  if sameModes(w.modesEntry, entry) then return end
-  entry.date = today()
   local cfg
   file, cfg = file or activeModel(), M.loadConfig()
   if not file or not cfg then return end   -- a damaged config stays untouched
+  if sameModes(cfg.modes[file], entry) then return end
+  entry.date = today()
   cfg.modes[file] = entry
-  if M.saveConfig(cfg) then w.modesEntry = entry end
+  -- The read may have started on another model: shown only while it is active.
+  if M.saveConfig(cfg) and file == activeModel() then w.modesEntry = entry end
 end
 
 -- Next request of the mode read (ranges, then ids and names page by page;
@@ -434,15 +435,16 @@ local MODES_CMD = { [M.MSP_MODE_RANGES] = true, [M.MSP_BOXIDS] = true, [M.MSP_BO
 local MODES_TRIES = 3   -- mode requests lost in a row before the read gives up for this link
 
 -- One MSP step per tick: drop a request after its timeout, then send the next
--- when the CRSF module takes one. Without any reply 10 s after the FC's first FM
--- text it gives up until the next link (a booting FC is still asked); with the
--- switch page on and an ArduPilot FM text it stores that the modes cannot be
--- read. Results: w.fcInfo, w.armReason, the stored modes (switch page on).
+-- when the CRSF module takes one. Asks only after the FC's first FM text (a
+-- receiver without FC is never asked); without any reply 10 s later it gives up
+-- until the next link; with the switch page on and an ArduPilot FM text it
+-- stores that the modes cannot be read. Results: w.fcInfo, w.armReason, the stored modes (switch page on).
 local function pollMsp(w, now, armed)
   if not w.linkUp or armed or not crossfireTelemetryPush then return end
   w.msp = w.msp or { seq = 0 }
   local m = w.msp
   if not m.fmAt and fmCurrent() then m.fmAt = now end
+  if not m.fmAt then return end
   if m.waiting and now - m.sentAt >= MSP_TIMEOUT then
     -- An FC that never answers a mode request: give up for this link, store nothing.
     if MODES_CMD[m.waiting] then
@@ -457,7 +459,7 @@ local function pollMsp(w, now, armed)
   local g, gm = w.gps, w.mods.gps
   if m.waiting and MODES_CMD[m.waiting] and g and gm and gm.mspPause then gm.mspPause(g, (now + MSP_TIMEOUT) * 10) end
   if m.waiting then return end
-  if not m.answered and m.fmAt and now - m.fmAt >= MSP_GIVE_UP_T then
+  if not m.answered and now - m.fmAt >= MSP_GIVE_UP_T then
     if w.switchPage and (w.fcGuess == "AP" or (g and g.fcKind == "AP")) and not m.apStored then
       m.apStored = true
       storeModes(w, { fw = "AP" })
@@ -632,6 +634,17 @@ local function readStick(w, now)
   if w.stickSeen then w.stick, w.stickEle = unit(w.ail), unit(w.ele) end
 end
 
+-- Chosen pack as the preflight and flight pages show it; also the capacity.
+local function battView(L, core)
+  local warn, crit = core.getThresholds(L)
+  local cap, left = leftMah(L, core)
+  local name, short = packLabel(L.selectedProfile, L.selectedInstances)
+  return { name = name, nameShort = short, pct = core.calculateRestPct(L),
+           warn = warn, crit = crit, volt = L.voltage,
+           cell = (L.voltage and L.cells and L.cells > 0) and L.voltage / L.cells or nil,
+           left = left, chem = L.selectedProfile.chemistry }, cap
+end
+
 -- Battery for the preflight page: the pack selection while it is open (with
 -- the sticks for the hint: stick aileron, ele elevator, -1..1, armed: a confirm
 -- can start (the aileron was back in the centre, the elevator is centred),
@@ -649,13 +662,7 @@ local function preBattery(w, now)
              armed = L.confirmArmed and math.abs(w.ele or 0) < CLOSE_DEAD }   -- the LiPo core's dead zone
   end
   if not L.selectedProfile then return nil end
-  local warn, crit = core.getThresholds(L)
-  local cells = L.cells
-  local name, short = packLabel(L.selectedProfile, L.selectedInstances)
-  return { name = name, nameShort = short, pct = core.calculateRestPct(L),
-           warn = warn, crit = crit, volt = L.voltage,
-           cell = (L.voltage and cells and cells > 0) and L.voltage / cells or nil,
-           left = select(2, leftMah(L, core)), chem = L.selectedProfile.chemistry }
+  return (battView(L, core))
 end
 
 local function preGps(w, g)
@@ -689,16 +696,10 @@ end
 local function flightView(w, on)
   local v = {}
   if lipoOn(w, on) and w.lipo.selectedProfile then
-    local L, core = w.lipo, w.mods.lipo
-    local warn, crit = core.getThresholds(L)
-    local cap, left = leftMah(L, core)
-    local name, short = packLabel(L.selectedProfile, L.selectedInstances)
-    v.batt = { name = name, nameShort = short, pct = core.calculateRestPct(L),
-               warn = warn, crit = crit, volt = L.voltage,
-               cell = (L.voltage and L.cells and L.cells > 0) and L.voltage / L.cells or nil,
-               chem = L.selectedProfile.chemistry,
-               left = left, used = L.capacity, cap = cap,
-               amps = L.current, timeLeft = L.timeLeftStr }   -- Lipo Nanny's estimate, every 2 s
+    local L = w.lipo
+    local b, cap = battView(L, w.mods.lipo)
+    b.used, b.cap, b.amps, b.timeLeft = L.capacity, cap, L.current, L.timeLeftStr   -- Lipo Nanny's estimate, every 2 s
+    v.batt = b
   end
   local g, r = gpsRes(w, on), linkRes(w, on)
   if g then
@@ -898,7 +899,7 @@ end
 
 -- Wait page gestures, aileron held a second: left reopens the last summary for
 -- ENDED_HOLD_T (while one is kept), right opens the switch page (switch page
--- on, no setup error); on the switch page left closes it. w.waitHold -1..1
+-- on); both only without a setup error; on the switch page left closes it. w.waitHold -1..1
 -- (negative while held left) for the hint bar, w.waitHint the gestures offered.
 local function waitGestures(w, now)
   if w.switchOpen then
@@ -916,7 +917,7 @@ local function waitGestures(w, now)
     return
   end
   w.reviewAt = nil
-  local review, switches = w.postKeep ~= nil, w.switchPage and not w.setupError and not w.swMissing
+  local review, switches = w.postKeep ~= nil and not w.setupError, w.switchPage and not w.setupError and not w.swMissing
   if not review and not switches then return end
   w.waitHint = { review = review, switches = switches }
   local sign = (w.ail or 0) < 0 and -1 or 1
@@ -946,6 +947,7 @@ local function buildPages(w, on, now, connected)
     elseif not w.linked then   -- a new link (new pack): fresh alerts, no summary
       w.linked, w.linkSince, w.flown, w.lostAt, w.farOut = true, now, false, nil, nil
       w.alerts, w.alertSeen, w.postKeep, w.armedSince, w.reviewAt = {}, {}, nil, nil, nil
+      w.lastTimerS, w.lastMode = nil, nil   -- another model may run without Timer 1
       if not w.searching then w.searchSrc = nil end
     end
     w.resumed = nil
@@ -1329,8 +1331,10 @@ function M.tick(w, on)
   -- With demo data the cores rest (no announcements from the simulator's sensors).
   local drive = not w.demo
   w.lipoOn = drive and on.lipo and w.lipo ~= nil and pcall(w.mods.lipo.tick, w.lipo)
-  -- Pack selection by stick (the LiPo core's gestures), disarmed only.
-  if w.lipoOn and not w.armed and not w.searching and w.lipo.pendingSelection and w.mods.lipo.pollSelectionSticks then
+  -- Pack selection by stick (the LiPo core's gestures), disarmed only. Stick
+  -- gestures rest while the last tick showed a setup error (page hidden).
+  if w.lipoOn and not w.armed and not w.searching and not w.setupError and w.lipo.pendingSelection
+     and w.mods.lipo.pollSelectionSticks then
     pcall(w.mods.lipo.pollSelectionSticks, w.lipo)
   end
   local ok
@@ -1351,7 +1355,7 @@ function M.tick(w, on)
     if not pcall(buildPages, w, on, now, w.connected) then
       w.flight, w.pre, w.search, w.post = nil, nil, nil, nil
     end
-    if w.search then
+    if w.search and not w.setupError then
       pcall(pollSearchHold, w, now)
       if not w.searching then w.search = nil end   -- closed by the gesture just now
     end
