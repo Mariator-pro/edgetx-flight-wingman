@@ -613,8 +613,29 @@ local function leftMah(L, core)
   return cap, (cap and used) and math.max(0, cap - used) or nil
 end
 
--- Battery for the preflight page: the pack selection while it is open, else
--- the chosen pack; nil before either.
+-- Sticks, read once per tick: w.ail, w.ele raw, w.stick, w.stickEle -1..1 for
+-- the stick hint's knob. The knob and the gestures wait until the aileron
+-- stayed in the centre for STICK_SEEN once (w.stickSeen: an untouched simulator
+-- stick reads 0 on the first tick, then full left).
+local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 922, 200, 100, 10   -- stick units (922: 90 %), getTime units
+local STICK_SEEN = 50   -- getTime units
+local function unit(v) return math.max(-1, math.min(1, v / 1024)) end
+local function readStick(w, now)
+  w.ail, w.ele = getValue("ail") or 0, getValue("ele") or 0
+  if math.abs(w.ail) < CLOSE_DEAD then
+    w.centreSince = w.centreSince or now
+    if now - w.centreSince >= STICK_SEEN then w.stickSeen = true end
+  else
+    w.centreSince = nil
+  end
+  w.stick, w.stickEle = 0, 0
+  if w.stickSeen then w.stick, w.stickEle = unit(w.ail), unit(w.ele) end
+end
+
+-- Battery for the preflight page: the pack selection while it is open (with
+-- the sticks for the hint: stick aileron, ele elevator, -1..1, armed: a confirm
+-- can start (the aileron was back in the centre, the elevator is centred),
+-- eleArmed: the next cursor step can), else the chosen pack; nil before either.
 local function preBattery(w, now)
   local L, core = w.lipo, w.mods.lipo
   if L.pendingSelection then
@@ -623,7 +644,9 @@ local function preBattery(w, now)
       packs[#packs + 1] = { name = packLabel(item.profile), pos = item.pos, cycles = item.cycles or 0 }
     end
     return { packs = packs, cursor = L.popupCursor or 1,
-             hold = L.confirmSince and math.min(1, (now - L.confirmSince) / 100) or 0 }
+             hold = L.confirmSince and math.min(1, (now - L.confirmSince) / 100) or 0,
+             stick = w.stick, ele = w.stickEle, eleArmed = L.stickArmed,
+             armed = L.confirmArmed and math.abs(w.ele or 0) < CLOSE_DEAD }   -- the LiPo core's dead zone
   end
   if not L.selectedProfile then return nil end
   local warn, crit = core.getThresholds(L)
@@ -797,22 +820,11 @@ end
 -- second, the other sticks free, armed again only after the aileron came
 -- back to the centre. Returns the hold 0..1 and true once complete: the full
 -- hold is returned at least once and kept CLOSE_SHOW before it completes, so
--- the bar is always seen full before the page changes. w.stick: the live
--- aileron -1..1 for the hint's stick symbol. Both the knob and the gesture wait
--- until the stick stayed in the centre for STICK_SEEN once (an untouched
--- simulator stick reads 0 on the first tick, then full left).
-local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 922, 200, 100, 10   -- stick units (922: 90 %), getTime units
-local STICK_SEEN = 50   -- getTime units
+-- the bar is always seen full before the page changes. The gesture waits for
+-- the stick seen in the centre (readStick).
 local function pollHold(w, now, sign)
-  local ail = getValue("ail") or 0
-  if math.abs(ail) < CLOSE_DEAD then
-    w.centreSince = w.centreSince or now
-    if now - w.centreSince >= STICK_SEEN then w.stickSeen = true end
-    if w.stickSeen then w.closeArmed = true end
-  else
-    w.centreSince = nil
-  end
-  w.stick = w.stickSeen and math.max(-1, math.min(1, ail / 1024)) or 0
+  local ail = w.ail or 0
+  if math.abs(ail) < CLOSE_DEAD and w.stickSeen then w.closeArmed = true end
   if w.closeArmed and sign * ail > CLOSE_AIL then
     w.closeSince = w.closeSince or now
     if now - w.closeSince >= CLOSE_HOLD then
@@ -833,7 +845,7 @@ end
 -- held right); aileron held left mutes or unmutes the finder beeps.
 -- w.searchHold: hold -1..1, negative while held left.
 local function pollSearchHold(w, now)
-  local sign = (getValue("ail") or 0) < 0 and -1 or 1
+  local sign = (w.ail or 0) < 0 and -1 or 1
   local hold, done = pollHold(w, now, sign)
   w.searchHold = sign * hold
   if done and sign < 0 then
@@ -907,7 +919,7 @@ local function waitGestures(w, now)
   local review, switches = w.postKeep ~= nil, w.switchPage and not w.setupError and not w.swMissing
   if not review and not switches then return end
   w.waitHint = { review = review, switches = switches }
-  local sign = (getValue("ail") or 0) < 0 and -1 or 1
+  local sign = (w.ail or 0) < 0 and -1 or 1
   local allowed = (sign < 0 and review) or (sign > 0 and switches)
   local hold, done = pollHold(w, now, allowed and sign or 0)
   w.waitHold = sign * hold
@@ -1308,6 +1320,7 @@ function M.tick(w, on)
   end
   w.lastTick = now
   on = on or pollModules(w, now)
+  if not w.demo then pcall(readStick, w, now) end
 
   pcall(pollFrames, w, on)
   pcall(updatePhase, w, now)

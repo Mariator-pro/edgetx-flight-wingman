@@ -242,30 +242,41 @@ local function drawCornerBar(z, txt, frac, color)
   dtext(bx - sc(12) - textW(txt, SMLSIZE), by + math.floor((barH - fontH(SMLSIZE)) / 2), txt, COLORS.muted, SMLSIZE)
 end
 
--- Aileron gesture hint, bottom centre: a stick symbol whose knob follows the
--- live aileron (stick -1..1, accent once off the centre), a button left and
--- right of it (label or nil) that fills from the stick outwards with the hold
--- (hold -1..1, negative held left), its arrow nudging while the gesture is
--- armed (the stick was back in the centre) and the stick leans towards it short
--- of the hold, centred on cx (default the zone's middle). Design px for 800
--- wide. Returns the hint's top.
-local function drawStickHint(z, left, right, hold, stick, armed, cx)
+-- Nudge offset 0..amp px (0.6 s cosine cycle) for an arrow that asks for more
+-- stick deflection.
+local function nudge(amp)
+  return math.floor(amp * (0.5 - 0.5 * math.cos(getTime() % 60 / 60 * 2 * math.pi)) + 0.5)
+end
+
+-- Stick gesture hint: a stick symbol whose knob follows the live sticks (o.stick
+-- aileron, o.ele elevator, -1..1, accent once off the centre), a button left
+-- and right of it (o.left, o.right: label or nil) that fills from the stick
+-- outwards with the hold (o.hold -1..1, negative held left), its arrow nudging
+-- while the gesture is armed (o.armed: the stick was back in the centre) and
+-- the stick leans towards it short of the hold. Placed with the symbol centred
+-- on o.cx (default the zone's middle) or its left edge at o.x, vertically
+-- centred on o.cy (default the zone's bottom). Design px for 800 wide.
+-- Returns the hint's top.
+local function drawStickHint(z, o)
   local kx = z.w / 800
   local k = math.min(kx, (z.h - HDR_H) / 418)
   local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
   local h, bw, gap, line = sc(30), math.floor(120 * kx + 0.5), sc(14), sc(2)
   local r = math.max(2, sc(6))
-  local y = z.h - sc(6) - h
-  cx = cx or math.floor(z.w / 2)
-  local ix = cx - math.floor(h / 2)
+  local left, right, hold, stick, armed = o.left, o.right, o.hold or 0, o.stick or 0, o.armed
+  local y = o.cy and o.cy - math.floor(h / 2) or z.h - sc(6) - h
+  local ix = o.x or (o.cx or math.floor(z.w / 2)) - math.floor(h / 2)
+  local cx = ix + math.floor(h / 2)
   local cy = y + math.floor(h / 2)
   -- Stick: outline, cross, knob (accent while deflected).
   fillRounded(ix, y, h, h, r, COLORS.muted)
   fillRounded(ix + line, y + line, h - 2 * line, h - 2 * line, math.max(1, r - line), COLORS.panel or COLORS.box)
   lcd.drawFilledRectangle(cx, y + sc(6), 1, h - 2 * sc(6), COLORS.track)
   lcd.drawFilledRectangle(ix + sc(6), cy, h - 2 * sc(6), 1, COLORS.track)
-  local off = math.floor(sc(6) * stick + 0.5)
-  lcd.drawFilledCircle(cx + off, cy, math.max(2, sc(4)), math.abs(stick) > 0.05 and COLORS.accent or COLORS.muted)
+  local ele = o.ele or 0
+  local off, offY = math.floor(sc(6) * stick + 0.5), -math.floor(sc(6) * ele + 0.5)
+  local live = math.abs(stick) > 0.05 or math.abs(ele) > 0.05
+  lcd.drawFilledCircle(cx + off, cy + offY, math.max(2, sc(4)), live and COLORS.accent or COLORS.muted)
   -- Buttons: border accent while held towards them, filled from the stick side.
   local ah, aw = sc(12), sc(10)
   for side = -1, 1, 2 do
@@ -287,7 +298,7 @@ local function drawStickHint(z, left, right, hold, stick, armed, cx)
       -- outwards (0.6 s cycle) to ask for the full deflection.
       local d = 0
       if armed and stick * side > 0.05 and frac <= 0 then
-        d = side * math.floor(sc(3) * (1 - math.cos(getTime() % 60 / 60 * 2 * math.pi)) + 0.5)
+        d = side * nudge(2 * sc(3))
       end
       if side < 0 then
         fillTri(tx + aw + d, ay, tx + d, cy, tx + aw + d, ay + ah, COLORS.fg)
@@ -615,8 +626,8 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local fh = fontH(SMLSIZE)
 
   -- Bottom row, always reserved: the two aileron holds (mute left, close right).
-  local top = drawStickHint(ctx.zone, ctx.w.finderMuted and "Sound on" or "Mute", "Close", ctx.w.searchHold or 0,
-                            ctx.w.stick or 0, ctx.w.closeArmed, x0 + math.floor(pw / 2))
+  local top = drawStickHint(ctx.zone, { left = ctx.w.finderMuted and "Sound on" or "Mute", right = "Close",
+                            hold = ctx.w.searchHold, stick = ctx.w.stick, armed = ctx.w.closeArmed, cx = x0 + math.floor(pw / 2) })
   bottom = math.min(bottom - fh, top) - p
 
   -- Title with the accent square of the column titles, bold like Lipo Nanny's
@@ -1677,8 +1688,11 @@ function KEPT.cut(text, maxW, font)
 end
 
 -- Pack selection inside the battery column: window around the cursor, confirm
--- hold as a bar behind the selected row, gesture legend at the bottom. The
--- selected name scrolls (restarting when the cursor moves), the others are cut.
+-- hold as a bar behind the selected row, the stick hint at the bottom. A
+-- triangle above and below the list while the cursor can move that way (the
+-- elevator gesture): accent while the elevator leans that way, nudging until
+-- the step counts. The selected name scrolls (restarting when the cursor
+-- moves), the others are cut.
 local function drawPackList(L, x, w, b, ctx)
   drawTitle(L, x, "SELECT PACK")
   local font = L.f.value
@@ -1703,7 +1717,30 @@ local function drawPackList(L, x, w, b, ctx)
     dtext(x, ty, prefix .. text, col, font)
     dtext(x + w - textW(suffix, font), ty, suffix, col, font)
   end
-  btext(x, L.y(STATUS_Y), "ele: up/dn  ail: hold >", COLORS.muted, L.f.cap)
+  local tw, th, cx = L.s(12), L.s(7), x + math.floor(w / 2)
+  local rows = math.min(#b.packs, maxRows)
+  for dir = -1, 1, 2 do   -- -1 up, 1 down
+    if dir < 0 and cursor > 1 or dir > 0 and cursor < #b.packs then
+      local lean = -dir * (b.ele or 0) > 0.05   -- elevator up (positive) moves the cursor up
+      local top = L.y(PACK_TOP) - L.s(3) - th
+      -- Up: never further than to the title's baseline (small screens have 1 or 2 px).
+      local amp = dir < 0 and math.min(L.s(3), math.max(0, top - L.y(31) - 1)) or L.s(3)
+      local d = (lean and b.eleArmed) and dir * nudge(amp) or 0
+      local col = lean and COLORS.accent or COLORS.muted
+      if dir < 0 then
+        local ty = top + d
+        fillTri(cx - math.floor(tw / 2), ty + th, cx + math.floor(tw / 2), ty + th, cx, ty, col)
+      else
+        local ty = L.y(PACK_TOP + rows * PACK_ROW_H) + L.s(2) + d
+        fillTri(cx - math.floor(tw / 2), ty, cx + math.floor(tw / 2), ty, cx, ty + th, col)
+      end
+    end
+  end
+  -- Gesture hint on the status line: elevator moves the cursor (the knob shows
+  -- it), aileron held right selects.
+  local fh = fontH(L.f.cap)
+  drawStickHint(ctx.zone, { right = "Select", hold = b.hold, stick = b.stick, ele = b.ele, armed = b.armed, x = x,
+                            cy = L.y(STATUS_Y) - math.floor(fh * BASELINE + 0.5) + math.floor(fh / 2) })
 end
 
 local function drawPreGps(L, x, w, g, st)
@@ -2293,8 +2330,8 @@ local function drawWait(ctx)
   -- Gestures: the last summary (while one is kept) and the switch page.
   local hint = ctx.w and ctx.w.waitHint
   if hint then
-    drawStickHint(z, hint.review and "Last flight" or nil, hint.switches and "Switches" or nil, ctx.w.waitHold or 0,
-                  ctx.w.stick or 0, ctx.w.closeArmed)
+    drawStickHint(z, { left = hint.review and "Last flight" or nil, right = hint.switches and "Switches" or nil,
+                       hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
   end
 end
 
@@ -2446,7 +2483,7 @@ do
       end
     end
     if dry and not v.loading and not KEPT.missed then KEPT.ready = true end
-    drawStickHint(z, "Back", nil, ctx.w.waitHold or 0, ctx.w.stick or 0, ctx.w.closeArmed)
+    drawStickHint(z, { left = "Back", hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
   end
 end
 
