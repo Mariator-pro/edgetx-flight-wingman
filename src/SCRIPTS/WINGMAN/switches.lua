@@ -307,11 +307,14 @@ function M.sourceText(modes)
   return t
 end
 
--- Live view: { src, rows = { { card | false, ... } } }. A card: { name, tag,
--- tagShort, pos = { { sym, modes, sf, cur } } }; modes only with FC modes
--- (not ArduPilot), on a custom mix only for the current position.
-function M.view(static, modes)
+-- Live view: { src, modes, rows = { { card | false, ... } } }. A card: { name,
+-- tag, tagShort, key, pos = { { sym, modes, sf, cur } } }; modes only with FC
+-- modes (not ArduPilot), on a custom mix only for the current position. Cards
+-- of old (the last view) whose switch and channel did not move are taken over,
+-- so the widget keeps what it measured on them.
+function M.view(static, modes, old)
   local ranges = modes and modes.fw ~= "AP" and modes.ranges or nil
+  if old and old.modes ~= modes then old = nil end
   local rows = {}
   for r, row in ipairs(static.rows) do
     local out = {}
@@ -319,7 +322,13 @@ function M.view(static, modes)
       if not sw then out[i] = false else
         local v = getValue(sw.id) or 0
         local curS = (v < -512) and -100 or (v > 512) and 100 or 0
-        local c, card = sw.chan, { name = sw.name, pos = {} }
+        local c = sw.chan
+        local live = c and getValue("ch" .. c.ch)
+        -- The live channel value counts only where it picks the current modes.
+        local key = curS .. "," .. ((ranges and c and c.ch >= 5) and tostring(live) or "")
+        local prev = old and old.rows[r] and old.rows[r][i]
+        if prev and prev.key == key then out[i] = prev else
+        local card = { name = sw.name, pos = {}, key = key }
         local aux = c and c.ch >= 5 and c.ch - 4 or nil
         if c and ranges and not c.simple then
           card.tag, card.tagShort = "custom mix", "custom"
@@ -334,7 +343,6 @@ function M.view(static, modes)
           card.tag = anySf and "EdgeTX" or "not used"
           card.tagShort = card.tag
         end
-        local live = c and getValue("ch" .. c.ch)
         for _, p in ipairs(sw.pos) do
           local cur = p.s == curS
           local m
@@ -349,11 +357,12 @@ function M.view(static, modes)
           card.pos[#card.pos + 1] = { sym = p.sym, modes = (m ~= "") and m or nil, sf = p.sf, play = p.play, cur = cur }
         end
         out[i] = card
+        end
       end
     end
     rows[r] = out
   end
-  return { src = M.sourceText(modes), rows = rows }
+  return { src = M.sourceText(modes), modes = modes, rows = rows }
 end
 
 return M

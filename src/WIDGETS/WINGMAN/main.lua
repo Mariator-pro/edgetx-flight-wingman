@@ -103,10 +103,17 @@ local function fontH(flags)
   return h
 end
 
+-- A stand-in for the drawing function f that appends the call to ops instead
+-- ({ f, arguments... }, replayed later through table.unpack). The helpers below
+-- take an optional ops to lay out once what is drawn every frame.
+local function rec(ops, f) return function(...) ops[#ops + 1] = { f, ... } end end
+
 -- Raw RGB through CUSTOM_COLOR so it never collides with size/align bits.
-local function dtext(x, y, text, color, flags)
-  lcd.setColor(CUSTOM_COLOR, color)
-  lcd.drawText(x, y, text, CUSTOM_COLOR + (flags or 0))
+local function dtext(x, y, text, color, flags, ops)
+  local set, draw = lcd.setColor, lcd.drawText
+  if ops then set, draw = rec(ops, set), rec(ops, draw) end
+  set(CUSTOM_COLOR, color)
+  draw(x, y, text, CUSTOM_COLOR + (flags or 0))
 end
 
 -- ---------------------------------------------------------------------------
@@ -131,12 +138,10 @@ local function fmtAmps(v)
   return fmt("%.1f A", v)
 end
 
-local function fillTri(x1, y1, x2, y2, x3, y3, col)
-  if lcd.drawFilledTriangle then
-    lcd.drawFilledTriangle(x1, y1, x2, y2, x3, y3, col)
-  elseif lcd.drawTriangle then
-    lcd.drawTriangle(x1, y1, x2, y2, x3, y3, col)
-  end
+local function fillTri(x1, y1, x2, y2, x3, y3, col, ops)
+  local tri = lcd.drawFilledTriangle or lcd.drawTriangle
+  if tri and ops then tri = rec(ops, tri) end
+  if tri then tri(x1, y1, x2, y2, x3, y3, col) end
 end
 
 -- Lines are 1 px in the Lua API: two side by side.
@@ -195,14 +200,16 @@ local function drawHeartbeat(cx, cy, r, floor, fixed)
 end
 
 -- No rounded rectangle in the Lua API: two overlapping bars plus four corner circles.
-local function fillRounded(x, y, w, h, r, color)
-  lcd.drawFilledRectangle(x + r, y, w - 2 * r, h, color)
-  lcd.drawFilledRectangle(x, y + r, w, h - 2 * r, color)
+local function fillRounded(x, y, w, h, r, color, ops)
+  local rect, circ = lcd.drawFilledRectangle, lcd.drawFilledCircle
+  if ops then rect, circ = rec(ops, rect), rec(ops, circ) end
+  rect(x + r, y, w - 2 * r, h, color)
+  rect(x, y + r, w, h - 2 * r, color)
   local x2, y2 = x + w - r - 1, y + h - r - 1
-  lcd.drawFilledCircle(x + r, y + r, r, color)
-  lcd.drawFilledCircle(x2, y + r, r, color)
-  lcd.drawFilledCircle(x + r, y2, r, color)
-  lcd.drawFilledCircle(x2, y2, r, color)
+  circ(x + r, y + r, r, color)
+  circ(x2, y + r, r, color)
+  circ(x + r, y2, r, color)
+  circ(x2, y2, r, color)
 end
 
 -- Bar fill of width w in a track with corner radius r. Two radii or wider:
@@ -235,11 +242,14 @@ local function drawCornerBar(z, txt, frac, color)
   dtext(bx - sc(12) - textW(txt, SMLSIZE), by + math.floor((barH - fontH(SMLSIZE)) / 2), txt, COLORS.muted, SMLSIZE)
 end
 
--- Aileron gesture hint, bottom centre: a stick symbol whose knob moves with the
--- hold (hold -1..1, negative held left), a button left and right of it (label
--- or nil) that fills from the stick outwards while held, centred on cx (default
--- the zone's middle). Design px for 800 wide. Returns the hint's top.
-local function drawStickHint(z, left, right, hold, cx)
+-- Aileron gesture hint, bottom centre: a stick symbol whose knob follows the
+-- live aileron (stick -1..1, accent once off the centre), a button left and
+-- right of it (label or nil) that fills from the stick outwards with the hold
+-- (hold -1..1, negative held left), its arrow nudging while the gesture is
+-- armed (the stick was back in the centre) and the stick leans towards it short
+-- of the hold, centred on cx (default the zone's middle). Design px for 800
+-- wide. Returns the hint's top.
+local function drawStickHint(z, left, right, hold, stick, armed, cx)
   local kx = z.w / 800
   local k = math.min(kx, (z.h - HDR_H) / 418)
   local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
@@ -249,14 +259,13 @@ local function drawStickHint(z, left, right, hold, cx)
   cx = cx or math.floor(z.w / 2)
   local ix = cx - math.floor(h / 2)
   local cy = y + math.floor(h / 2)
-  -- Stick: outline, cross, knob (accent while held).
+  -- Stick: outline, cross, knob (accent while deflected).
   fillRounded(ix, y, h, h, r, COLORS.muted)
   fillRounded(ix + line, y + line, h - 2 * line, h - 2 * line, math.max(1, r - line), COLORS.panel or COLORS.box)
   lcd.drawFilledRectangle(cx, y + sc(6), 1, h - 2 * sc(6), COLORS.track)
   lcd.drawFilledRectangle(ix + sc(6), cy, h - 2 * sc(6), 1, COLORS.track)
-  local off = math.floor(sc(6) * math.max(-1, math.min(1, hold * 1.6)) + 0.5)
-  -- hold > 0 or < 0, not ~= 0: on the radio a hold of 0.75 compared equal to 0.
-  lcd.drawFilledCircle(cx + off, cy, math.max(2, sc(4)), (hold > 0 or hold < 0) and COLORS.accent or COLORS.muted)
+  local off = math.floor(sc(6) * stick + 0.5)
+  lcd.drawFilledCircle(cx + off, cy, math.max(2, sc(4)), math.abs(stick) > 0.05 and COLORS.accent or COLORS.muted)
   -- Buttons: border accent while held towards them, filled from the stick side.
   local ah, aw = sc(12), sc(10)
   for side = -1, 1, 2 do
@@ -274,11 +283,18 @@ local function drawStickHint(z, left, right, hold, cx)
       local tw = textW(label, SMLSIZE)
       local tx = bx + math.floor((bw - tw - aw - sc(8)) / 2)
       local ay = cy - math.floor(ah / 2)
+      -- Stick towards the button but the hold not started: the arrow nudges
+      -- outwards (0.6 s cycle) to ask for the full deflection.
+      local d = 0
+      if armed and stick * side > 0.05 and frac <= 0 then
+        d = side * math.floor(sc(3) * (1 - math.cos(getTime() % 60 / 60 * 2 * math.pi)) + 0.5)
+      end
       if side < 0 then
-        fillTri(tx + aw, ay, tx, cy, tx + aw, ay + ah, COLORS.fg)
+        fillTri(tx + aw + d, ay, tx + d, cy, tx + aw + d, ay + ah, COLORS.fg)
         tx = tx + aw + sc(8)
       else
-        fillTri(tx + tw + sc(8), ay, tx + tw + sc(8) + aw, cy, tx + tw + sc(8), ay + ah, COLORS.fg)
+        local ax = tx + tw + sc(8) + d
+        fillTri(ax, ay, ax + aw, cy, ax, ay + ah, COLORS.fg)
       end
       dtext(tx, cy, label, COLORS.fg, SMLSIZE + VCENTER)
     end
@@ -564,17 +580,18 @@ end
 local drawSpeaker
 do
   local geo = {}
-  function drawSpeaker(x, cy, h, lit, muted)
+  function drawSpeaker(x, cy, h, lit, muted, ops)
     local col = lit and COLORS.accent or COLORS.muted
+    local rect = ops and rec(ops, lcd.drawFilledRectangle) or lcd.drawFilledRectangle
     local g = geo[h]
     if not g then
       g = { math.max(2, math.floor(h * 0.25)), math.max(2, math.floor(h * 0.2)), math.max(3, math.floor(h * 0.45)), math.floor(h * 0.45) }
       geo[h] = g
     end
     local bw, bt, cw, ch = g[1], g[2], g[3], g[4]
-    lcd.drawFilledRectangle(x, cy - bt, bw, 2 * bt, col)
-    fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col)
-    fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col)
+    rect(x, cy - bt, bw, 2 * bt, col)
+    fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col, ops)
+    fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col, ops)
     if muted then thickLine(x - 1, cy + ch, x + bw + cw, cy - ch, COLORS.fg) end
   end
 end
@@ -599,7 +616,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
 
   -- Bottom row, always reserved: the two aileron holds (mute left, close right).
   local top = drawStickHint(ctx.zone, ctx.w.finderMuted and "Sound on" or "Mute", "Close", ctx.w.searchHold or 0,
-                            x0 + math.floor(pw / 2))
+                            ctx.w.stick or 0, ctx.w.closeArmed, x0 + math.floor(pw / 2))
   bottom = math.min(bottom - fh, top) - p
 
   -- Title with the accent square of the column titles, bold like Lipo Nanny's
@@ -1622,8 +1639,8 @@ local function keptSlot(key)
   KEPT.n, KEPT.left = KEPT.n + 1, KEPT.left - 1
   return true
 end
-function KEPT.marquee(name, maxW, t, font)
-  local key = font .. "|" .. maxW .. "|" .. name
+function KEPT.marquee(name, maxW, t, font, key)   -- key: as built here, when the caller keeps it
+  key = key or (font .. "|" .. maxW .. "|" .. name)
   local m = KEPT.memo[key]
   if not m then
     if not keptSlot(key) then return nil end
@@ -2276,7 +2293,8 @@ local function drawWait(ctx)
   -- Gestures: the last summary (while one is kept) and the switch page.
   local hint = ctx.w and ctx.w.waitHint
   if hint then
-    drawStickHint(z, hint.review and "Last flight" or nil, hint.switches and "Switches" or nil, ctx.w.waitHold or 0)
+    drawStickHint(z, hint.review and "Last flight" or nil, hint.switches and "Switches" or nil, ctx.w.waitHold or 0,
+                  ctx.w.stick or 0, ctx.w.closeArmed)
   end
 end
 
@@ -2284,113 +2302,152 @@ end
 -- rows of four (two left, two right, as on the radio), each with its channel
 -- and per position the FC's modes and the special functions, the current
 -- position on a darker band; bottom right the gesture back.
-local SW_GAP = { card = 10, side = 22 }   -- design px between cards, between the two sides
--- dry: measure only (texts for KEPT), nothing drawn.
-local function drawSwitchCard(c, x, y, w, h, wide, now, dry)
-  local pad = math.max(3, math.floor(8 * w / 180 + 0.5))
-  if not dry then fillRounded(x, y, w, h, math.max(2, math.floor(pad * 0.75)), COLORS.box) end
-  local fName, fRow = wide and BOLD or SMLSIZE, SMLSIZE
-  local nh, lh = fontH(fName), fontH(fRow)
-  local right, bottom = x + w - pad, y + h - math.floor(pad / 2)
-  local fSym = SMLSIZE
-  -- Widths kept on the card while its view and size stay (the tag once measured).
-  local lay = c.lay
-  if not lay or lay.w ~= w or lay.wide ~= wide then
-    local tag = c.tag
+-- A card's static part (box, name, channel, bands, tiles, speakers) is laid out
+-- once as drawing calls (rec) and replayed every frame through table.unpack;
+-- only the marquee texts are worked out per frame. Kept on the card while its
+-- place, size and palette stay.
+local drawSwitches
+do
+  local SW_GAP = { card = 10, side = 22 }   -- design px between cards, between the two sides
+  local LAYS = 2                            -- cards laid out per frame at most
+  local floor, max, unpack = math.floor, math.max, table.unpack
+
+  -- lay.ops: the static drawing; lay.mq: the marquee texts, 7 slots each (x, y,
+  -- text, width, colour, font, KEPT key).
+  local function layout(c, x, y, w, h, wide)
+    local pad = max(3, floor(8 * w / 180 + 0.5))
+    local fName, fRow, fSym = wide and BOLD or SMLSIZE, SMLSIZE, SMLSIZE
+    local nh, lh = fontH(fName), fontH(fRow)
+    local right, bottom = x + w - pad, y + h - floor(pad / 2)
+    local ops, mq = {}, {}
+    local lay = { x = x, y = y, w = w, h = h, wide = wide, colors = COLORS, ops = ops, mq = mq }
+    local function marquee(tx, ty, t, maxW, col)
+      local n = #mq
+      mq[n + 1], mq[n + 2], mq[n + 3], mq[n + 4], mq[n + 5], mq[n + 6], mq[n + 7] =
+        tx, ty, t, maxW, col, fRow, fRow .. "|" .. maxW .. "|" .. t
+    end
+    fillRounded(x, y, w, h, max(2, floor(pad * 0.75)), COLORS.box, ops)
     local nameW = textW(c.name, fName)
+    local tag = c.tag
     if textW(tag, SMLSIZE) > w - 3 * pad - nameW then tag = c.tagShort or tag end
-    tag = KEPT.cut(tag, math.max(0, w - 3 * pad - nameW), SMLSIZE)
-    lay = { w = w, wide = wide, tag = tag, tagW = tag and textW(tag, SMLSIZE), symW = textW("W", fRow) + pad, sym = {} }
-    for i, p in ipairs(c.pos) do lay.sym[i] = textW(p.sym, fSym) end
-    if tag then c.lay = lay end
-  end
-  if not dry then
-    dtext(x + pad, y + pad, c.name, COLORS.fg, fName)
-    if lay.tag then dtext(right - lay.tagW, y + pad + nh - fontH(SMLSIZE), lay.tag, COLORS.muted, SMLSIZE) end
-  end
-  local symW = lay.symW
-  local half = math.floor(pad / 2)
-  local tileX, tileW, inset = x + pad, symW - half, math.max(1, math.floor(pad / 3))
-  local bandR = math.max(2, half)
-  local tx = x + pad + symW
-  local tw = right - tx
-  local gh = math.floor(lh * 0.6)
-  local playX, ghMid = tx + gh + half, math.floor(lh / 2)
-  local ty = y + pad + nh
-  -- Modes and special functions on separate lines; when that does not fit,
-  -- the functions beside modes only on the current position.
-  local need = 0
-  for _, p in ipairs(c.pos) do need = need + ((p.modes and p.sf) and 2 or 1) end
-  local all = ty + need * lh <= bottom
-  for i, p in ipairs(c.pos) do
-    local sf = p.sf
-    if p.modes and not (all or p.cur) then sf = nil end
-    local lines = (p.modes and sf) and 2 or 1
-    local lh2 = lines * lh
-    if ty + lh2 > bottom then break end
-    -- The symbol on a tile over all lines of its position, accent when current.
-    if not dry then
-      if p.cur then fillRounded(x + half, ty, w - pad, lh2, bandR, COLORS.swCur) end
+    -- The tag is measured outside the frame's allowance (the marquees of the
+    -- cards drawn before may have used it up), at most LAYS per frame.
+    local left = KEPT.left
+    KEPT.left = 1
+    tag = KEPT.cut(tag, max(0, w - 3 * pad - nameW), SMLSIZE)
+    KEPT.left = left
+    dtext(x + pad, y + pad, c.name, COLORS.fg, fName, ops)
+    if tag then dtext(right - textW(tag, SMLSIZE), y + pad + nh - fontH(SMLSIZE), tag, COLORS.muted, SMLSIZE, ops) end
+    local rect = rec(ops, lcd.drawFilledRectangle)
+    local half = floor(pad / 2)
+    local symW = textW("W", fRow) + pad
+    local tileX, tileW, inset = x + pad, symW - half, max(1, floor(pad / 3))
+    local bandR = max(2, half)
+    local tx = x + pad + symW
+    local tw = right - tx
+    local gh = floor(lh * 0.6)
+    local playX, ghMid = tx + gh + half, floor(lh / 2)
+    local ty = y + pad + nh
+    -- Modes and special functions on separate lines; when that does not fit,
+    -- the functions beside modes only on the current position.
+    local need = 0
+    for _, p in ipairs(c.pos) do need = need + ((p.modes and p.sf) and 2 or 1) end
+    local all = ty + need * lh <= bottom
+    for _, p in ipairs(c.pos) do
+      local sf = p.sf
+      if p.modes and not (all or p.cur) then sf = nil end
+      local lh2 = ((p.modes and sf) and 2 or 1) * lh
+      if ty + lh2 > bottom then break end
+      -- The symbol on a tile over all lines of its position, accent when current.
+      if p.cur then fillRounded(x + half, ty, w - pad, lh2, bandR, COLORS.swCur, ops) end
       local th = lh2 - 2 * inset
       local col = p.cur and COLORS.accent or COLORS.swTile   -- two rectangles: 1 px corners, no circles
-      lcd.drawFilledRectangle(tileX + 1, ty + inset, tileW - 2, th, col)
-      lcd.drawFilledRectangle(tileX, ty + inset + 1, tileW, th - 2, col)
-      dtext(tileX + math.floor((tileW - lay.sym[i]) / 2), ty + inset + math.floor(th / 2),
-            p.sym, p.cur and COLORS.swOnAccent or COLORS.fg, fSym + VCENTER)
-    end
-    if p.modes then
-      local m = KEPT.marquee(p.modes, tw, now, fRow)
-      if m and not dry then dtext(tx, ty, m, COLORS.fg, fRow) end
-    end
-    if sf then
-      local sy, sx = p.modes and ty + lh or ty, tx
-      if p.play then
-        if not dry then drawSpeaker(sx, sy + ghMid, gh, false, false) end
-        sx = playX
+      rect(tileX + 1, ty + inset, tileW - 2, th, col)
+      rect(tileX, ty + inset + 1, tileW, th - 2, col)
+      dtext(tileX + floor((tileW - textW(p.sym, fSym)) / 2), ty + inset + floor(th / 2),
+            p.sym, p.cur and COLORS.swOnAccent or COLORS.fg, fSym + VCENTER, ops)
+      if p.modes then marquee(tx, ty, p.modes, tw, COLORS.fg) end
+      if sf then
+        local sy, sx = p.modes and ty + lh or ty, tx
+        if p.play then
+          drawSpeaker(sx, sy + ghMid, gh, false, false, ops)
+          sx = playX
+        end
+        marquee(sx, sy, sf, right - sx, COLORS.muted)
       end
-      local f = KEPT.marquee(sf, right - sx, now, fRow)
-      if f and not dry then dtext(sx, sy, f, COLORS.muted, fRow) end
+      ty = ty + lh2
     end
-    ty = ty + lh2
+    return lay
   end
-end
 
-local function drawSwitches(ctx)
-  local z, v, now = ctx.zone, ctx.w.sw, getTime()
-  if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
-  local L = flightLayout(z)
-  local wide = z.w >= 700
-  local x0, right = L.x(18), z.w - L.x(18)
-  drawTitle(L, x0, "SWITCHES")
-  -- After opening, the texts are measured over a few frames (cards not yet
-  -- drawn) so no frame measures them all; then a few new ones per frame.
-  if v.loading then KEPT.ready = false end
-  local dry = not KEPT.ready
-  KEPT.left, KEPT.missed = dry and 24 or 4, false
-  if v.src then
-    local titleR = x0 + L.s(19) + textW("SWITCHES", L.f.title) + L.x(16)
-    local src = KEPT.cut(v.src, right - titleR, SMLSIZE)
-    if src then rtext(right, L.y(31), src, COLORS.muted, SMLSIZE) end
-  end
-  local top = L.y(46)
-  local bottom = z.h - fontH(SMLSIZE) - L.s(26)
-  local gap, side = L.x(SW_GAP.card), L.x(SW_GAP.side)
-  local cw = math.floor((right - x0 - side - 2 * gap) / 4)
-  local n = math.max(1, #v.rows)
-  local rgap = L.s(SW_GAP.card)
-  local ch = math.floor((bottom - top - (n - 1) * rgap) / n)
-  for r, row in ipairs(v.rows) do
-    local y = top + (r - 1) * (ch + rgap)
-    for i = 1, 4 do
-      local c = row[i]
-      if c then
-        local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and (side - gap) or 0)
-        drawSwitchCard(c, x, y, cw, ch, wide, now, dry)
+  -- dry: measure only (texts for KEPT), nothing drawn. At most KEPT.lays cards
+  -- are laid out per frame; past that the card is left out and the page goes
+  -- back to measuring (KEPT.ready false) until every card has its layout.
+  local function drawSwitchCard(c, x, y, w, h, wide, now, dry)
+    local lay = c.lay
+    if not lay or lay.x ~= x or lay.y ~= y or lay.w ~= w or lay.h ~= h or lay.wide ~= wide or lay.colors ~= COLORS then
+      if KEPT.lays <= 0 then KEPT.missed, KEPT.ready = true, false; return end
+      KEPT.lays = KEPT.lays - 1
+      lay = layout(c, x, y, w, h, wide)
+      c.lay = lay
+    end
+    local mq, marquee = lay.mq, KEPT.marquee
+    if dry then
+      for i = 1, #mq, 7 do marquee(mq[i + 2], mq[i + 3], now, mq[i + 5], mq[i + 6]) end
+      return
+    end
+    local ops = lay.ops
+    for i = 1, #ops do
+      local o = ops[i]
+      o[1](unpack(o, 2))
+    end
+    local set, draw = lcd.setColor, lcd.drawText
+    for i = 1, #mq, 7 do
+      local t = marquee(mq[i + 2], mq[i + 3], now, mq[i + 5], mq[i + 6])
+      if t then
+        set(CUSTOM_COLOR, mq[i + 4])
+        draw(mq[i], mq[i + 1], t, CUSTOM_COLOR + mq[i + 5])
       end
     end
   end
-  if dry and not v.loading and not KEPT.missed then KEPT.ready = true end
-  drawStickHint(z, "Back", nil, ctx.w.waitHold or 0)
+
+  function drawSwitches(ctx)
+    local z, v, now = ctx.zone, ctx.w.sw, getTime()
+    if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
+    local L = flightLayout(z)
+    local wide = z.w >= 700
+    local x0, right = L.x(18), z.w - L.x(18)
+    drawTitle(L, x0, "SWITCHES")
+    -- After opening, the texts are measured over a few frames (cards not yet
+    -- drawn) so no frame measures them all; then a few new ones per frame.
+    if v.loading then KEPT.ready = false end
+    local dry = not KEPT.ready
+    KEPT.left, KEPT.missed, KEPT.lays = dry and 24 or 4, false, LAYS
+    if v.src then
+      local titleR = x0 + L.s(19) + textW("SWITCHES", L.f.title) + L.x(16)
+      local src = KEPT.cut(v.src, right - titleR, SMLSIZE)
+      if src then rtext(right, L.y(31), src, COLORS.muted, SMLSIZE) end
+    end
+    local top = L.y(46)
+    local bottom = z.h - fontH(SMLSIZE) - L.s(26)
+    local gap, side = L.x(SW_GAP.card), L.x(SW_GAP.side)
+    local cw = floor((right - x0 - side - 2 * gap) / 4)
+    local n = max(1, #v.rows)
+    local rgap = L.s(SW_GAP.card)
+    local ch = floor((bottom - top - (n - 1) * rgap) / n)
+    for r, row in ipairs(v.rows) do
+      local y = top + (r - 1) * (ch + rgap)
+      for i = 1, 4 do
+        local c = row[i]
+        if c then
+          local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and (side - gap) or 0)
+          drawSwitchCard(c, x, y, cw, ch, wide, now, dry)
+        end
+      end
+    end
+    if dry and not v.loading and not KEPT.missed then KEPT.ready = true end
+    drawStickHint(z, "Back", nil, ctx.w.waitHold or 0, ctx.w.stick or 0, ctx.w.closeArmed)
+  end
 end
 
 -- Wingman's own core missing or failing: say so instead of an empty page.

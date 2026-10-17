@@ -794,15 +794,26 @@ local function postView(w, on)
 end
 
 -- Stick hold: aileron held full to one side (sign 1 right, -1 left) for a
--- second with the elevator centred, armed again only after the aileron came
+-- second, the other sticks free, armed again only after the aileron came
 -- back to the centre. Returns the hold 0..1 and true once complete: the full
 -- hold is returned at least once and kept CLOSE_SHOW before it completes, so
--- the bar is always seen full before the page changes.
-local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 700, 200, 100, 10   -- stick units, getTime units
+-- the bar is always seen full before the page changes. w.stick: the live
+-- aileron -1..1 for the hint's stick symbol. Both the knob and the gesture wait
+-- until the stick stayed in the centre for STICK_SEEN once (an untouched
+-- simulator stick reads 0 on the first tick, then full left).
+local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 922, 200, 100, 10   -- stick units (922: 90 %), getTime units
+local STICK_SEEN = 50   -- getTime units
 local function pollHold(w, now, sign)
-  local ail, ele = getValue("ail") or 0, getValue("ele") or 0
-  if math.abs(ail) < CLOSE_DEAD then w.closeArmed = true end
-  if w.closeArmed and sign * ail > CLOSE_AIL and math.abs(ele) < CLOSE_DEAD then
+  local ail = getValue("ail") or 0
+  if math.abs(ail) < CLOSE_DEAD then
+    w.centreSince = w.centreSince or now
+    if now - w.centreSince >= STICK_SEEN then w.stickSeen = true end
+    if w.stickSeen then w.closeArmed = true end
+  else
+    w.centreSince = nil
+  end
+  w.stick = w.stickSeen and math.max(-1, math.min(1, ail / 1024)) or 0
+  if w.closeArmed and sign * ail > CLOSE_AIL then
     w.closeSince = w.closeSince or now
     if now - w.closeSince >= CLOSE_HOLD then
       if w.closeFullAt and now - w.closeFullAt >= CLOSE_SHOW then
@@ -863,7 +874,7 @@ local function switchView(w)
   end
   local key = w.swMod.stateKey(w.swStatic)
   if not w.swView or key ~= w.swKey or w.modesEntry ~= w.swModesOf then
-    w.swView, w.swKey, w.swModesOf = w.swMod.view(w.swStatic, w.modesEntry), key, w.modesEntry
+    w.swView, w.swKey, w.swModesOf = w.swMod.view(w.swStatic, w.modesEntry, w.swView), key, w.modesEntry
   end
   return w.swView
 end
@@ -1120,7 +1131,10 @@ local function updateDemo(w, now)
   -- DEMO may name the page ("flight", "search"); true takes the demo's default.
   if w.demo then kind, data = w.demo(w, now, M, type(M.DEMO) == "string" and M.DEMO or nil) end
   if kind == "flight" then w.flight = data end
-  if kind == "switches" then w.sw = data.view; w.waitHint, w.waitHold = data.hint, data.hold end
+  if kind == "switches" then
+    w.sw, w.waitHint, w.waitHold = data.view, data.hint, data.hold
+    w.stick, w.closeArmed = data.stick or 0, true
+  end
   if kind == "post" then w.post = data end
   if kind == "pre" then
     w.pre = data
@@ -1228,7 +1242,8 @@ end
 
 -- Switches of the active model, the mascot, the flight time and GPS view choice, re-read every 5 s (a
 -- change in the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot, flight time and GPS view.
+-- file: all on, default mascot, flight time and GPS view. The stored modes keep their
+-- table while unchanged, so the switch page is not built again on every read.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
   w.onAt = now
@@ -1238,7 +1253,8 @@ local function pollModules(w, now)
   w.flightTime = cfg and cfg.flightTime
   w.gpsView = cfg and cfg.gpsView
   w.switchPage = not cfg or cfg.switchPage
-  w.modesEntry = cfg and file and cfg.modes[file] or nil
+  local modes = cfg and file and cfg.modes[file] or nil
+  if not (sameModes(w.modesEntry, modes) and w.modesEntry.date == modes.date) then w.modesEntry = modes end
   return w.on
 end
 
