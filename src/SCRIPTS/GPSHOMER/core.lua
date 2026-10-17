@@ -983,6 +983,7 @@ local function pollDop(state, ground, now)
   local active = ground and not state.dopGaveUp and state.fcKind ~= "AP"
   if active and crossfireTelemetryPush
      and (state.dopSentAt == nil or now - state.dopSentAt >= P.DOP_POLL_T * 1000)
+     and not (state.mspPauseUntil and now < state.mspPauseUntil)
      and crossfireTelemetryPush() then   -- nil: no CRSF module, false: buffer busy
     crossfireTelemetryPush(MSP_REQ, M.mspRequest(state.dopSeq, M.MSP_RAW_GPS))
     state.dopSeq, state.dopSentAt, state.dopWaiting = (state.dopSeq + 1) % 16, now, true
@@ -990,6 +991,19 @@ local function pollDop(state, ground, now)
   end
   if state.dopAt and now - state.dopAt <= P.DOP_STALE_T * 1000 then return state.dop end
   return nil
+end
+
+-- For another script sharing the MSP channel: true while no DOP reply is
+-- outstanding and the next DOP request is at least 0.5 s away (now in ms).
+function M.mspFree(state, now)
+  if state.dopWaiting then return false end
+  return not (state.dopGround and state.dopSentAt and now - state.dopSentAt > M.PARAMS.DOP_POLL_T * 1000 - 500)
+end
+
+-- Holds the DOP requests until untilMs (a long reply of another script must not
+-- be cut off at the flight controller); nil ends the hold.
+function M.mspPause(state, untilMs)
+  state.mspPauseUntil = untilMs
 end
 
 -- Read + validate every sensor. Invalid samples become nil so evaluate() keeps

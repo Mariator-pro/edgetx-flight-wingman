@@ -193,6 +193,8 @@ local MSP_REQ, MSP_RESP   = 0x7A, 0x7B
 local ADDR_FC, ADDR_RADIO = 0xC8, 0xEA
 M.MSP_FC_VARIANT, M.MSP_FC_VERSION, M.MSP_BOARD_INFO = 2, 3, 4
 M.MSP_STATUS_EX, M.MSP2_INAV_STATUS = 150, 0x2000
+M.MSP_MODE_RANGES, M.MSP_BOXNAMES, M.MSP_BOXIDS = 34, 116, 119   -- switch page
+local BOX_PAGE = 32   -- Betaflight sends names and ids in pages of 32 modes
 local MSP_TIMEOUT  = 100   -- getTime units: 1 s for a reply
 local MSP_GIVE_UP_T = 1000 -- no reply at all 10 s after the FC's first FM text: give up (ArduPilot never answers)
 local REASON_EVERY = 200   -- 2 s between arming status polls
@@ -210,32 +212,63 @@ local INAV_ARMING = { [6] = "GEOZONE", [7] = "FAILSAFE", [8] = "NOT_LEVEL", [9] 
   [21] = "CMS", [22] = "OSD", [23] = "ROLLPITCH", [24] = "SERVO_TRIM", [25] = "OOM", [26] = "SETTINGS",
   [27] = "PWM_OUTPUT", [28] = "NOPREARM", [29] = "DSHOT_BEEPER", [30] = "LANDED" }
 
--- CRSF payload of an MSP request without data: MSPv1, or MSPv2 for a command
--- above 255 (status: version, start flag, sequence 0..15).
-function M.mspRequest(seq, cmd)
-  if cmd > 255 then
-    return { ADDR_FC, ADDR_RADIO, 0x50 + seq % 16, 0, cmd % 256, math.floor(cmd / 256), 0, 0 }
+-- CRSF payload of an MSP request: MSPv1, or MSPv2 for a command above 255 or
+-- when v2 is set (status: version, start flag, sequence 0..15). data: optional
+-- payload bytes (MSPv2 only). Long replies are asked as MSPv2: its 16-bit size
+-- holds them (INAV cuts the MSPv1 size byte above 255).
+function M.mspRequest(seq, cmd, v2, data)
+  if cmd > 255 or v2 then
+    local n = data and #data or 0
+    local d = { ADDR_FC, ADDR_RADIO, 0x50 + seq % 16, 0, cmd % 256, math.floor(cmd / 256), n % 256, math.floor(n / 256) }
+    for _, b in ipairs(data or {}) do d[#d + 1] = b end
+    return d
   end
   return { ADDR_FC, ADDR_RADIO, 0x30 + seq % 16, 0, cmd }
 end
 
--- First chunk of an MSP reply (v1 or v2): cmd and the payload bytes it holds
--- (a long reply's later chunks are not needed); nil for anything else.
-function M.mspReply(data)
+-- One chunk of an MSP reply into rx (state per link): returns cmd and the whole
+-- payload once the last chunk is in, else nil. The first chunk carries the
+-- size (MSPv1 one byte, 0xFF plus 16 bits for a jumbo reply; MSPv2 16 bits),
+-- later chunks only a status byte with the next sequence number; a gap, an
+-- error or another sender drops the reply.
+function M.mspChunk(rx, data)
   if type(data) ~= "table" or data[1] ~= ADDR_RADIO or data[2] ~= ADDR_FC then return nil end
   local status = data[3] or 0
-  if status >= 128 or math.floor(status / 16) % 2 ~= 1 then return nil end   -- error or not a start
-  local version, cmd, first = math.floor(status / 32) % 4, nil, nil
-  if version == 1 then
-    cmd, first = data[5], 6
-  elseif version == 2 then
-    cmd, first = (data[5] or 0) + (data[6] or 0) * 256, 9
+  local seq, first = status % 16, nil
+  if status >= 128 then rx.cmd = nil; return nil end
+  if math.floor(status / 16) % 2 == 1 then
+    local version = math.floor(status / 32) % 4
+    if version == 1 then
+      rx.cmd, rx.size, first = data[5], data[4] or 0, 6
+      if rx.size == 255 then rx.size, first = (data[6] or 0) + (data[7] or 0) * 256, 8 end
+    elseif version == 2 then
+      rx.cmd, rx.size, first = (data[5] or 0) + (data[6] or 0) * 256, (data[7] or 0) + (data[8] or 0) * 256, 9
+    else
+      rx.cmd = nil
+      return nil
+    end
+    rx.p = {}
+  elseif rx.cmd and seq == (rx.seq + 1) % 16 then
+    first = 4
   else
+    rx.cmd = nil
     return nil
   end
-  local p = {}
-  for i = first, #data do p[#p + 1] = data[i] end
+  rx.seq = seq
+  local p = rx.p
+  for i = first, #data do
+    if #p >= rx.size then break end
+    p[#p + 1] = data[i]
+  end
+  if #p < rx.size then return nil end
+  local cmd = rx.cmd
+  rx.cmd = nil
   return cmd, p
+end
+
+-- A single-chunk reply: cmd and payload, nil for anything else.
+function M.mspReply(data)
+  return M.mspChunk({}, data)
 end
 
 local function u32(p, i)
@@ -279,13 +312,45 @@ function M.armingReasons(cmd, p)
   return table.concat(names, ", ")
 end
 
--- Takes one popped frame; true when it was the awaited MSP reply.
+-- Modes for the switch page from MSP_MODE_RANGES (4 bytes per slot: permanent
+-- mode id, AUX index from 0, start and end step; step x 25 + 900 us, start =
+-- end is an empty slot) and the names: per page the MSP_BOXIDS bytes and the
+-- MSP_BOXNAMES text ("ARM;ANGLE;..."), same order. Returns { { name, aux, lo,
+-- hi } } with aux from 1 and lo/hi in us; an id without a name as "MODE <id>".
+function M.modeRanges(ranges, ids, names)
+  local byId = {}
+  for pg, idList in pairs(ids or {}) do
+    local nm = {}
+    for n in string.gmatch(names and names[pg] or "", "[^;]+") do nm[#nm + 1] = n end
+    for i, id in ipairs(idList) do byId[id] = nm[i] end
+  end
+  local out = {}
+  for i = 1, #ranges - 3, 4 do
+    local id, aux, s, e = ranges[i], ranges[i + 1], ranges[i + 2], ranges[i + 3]
+    if s < e then
+      out[#out + 1] = { name = byId[id] or ("MODE " .. id), aux = aux + 1, lo = 900 + 25 * s, hi = 900 + 25 * e }
+    end
+  end
+  return out
+end
+
+-- Takes one popped frame; true when it was (a chunk of) the awaited MSP reply.
 mspFrame = function(w, cmd, data)
   local m = w.msp
   if not m or not m.waiting or cmd ~= MSP_RESP then return false end
-  local rcmd, p = M.mspReply(data)
+  m.rx = m.rx or {}
+  local rcmd, p = M.mspChunk(m.rx, data)
+  if not rcmd then
+    if m.rx.cmd == m.waiting then m.sentAt = getTime() end   -- a long reply is coming in
+    return false
+  end
   if rcmd ~= m.waiting then return false end
   m.waiting, m.answered = nil, true
+  if rcmd == M.MSP_MODE_RANGES or rcmd == M.MSP_BOXIDS or rcmd == M.MSP_BOXNAMES then m.modeLost = 0 end
+  local md = m.modes
+  if rcmd == M.MSP_MODE_RANGES then md.ranges = p; return true end
+  if rcmd == M.MSP_BOXIDS then md.ids[md.page] = p; return true end
+  if rcmd == M.MSP_BOXNAMES then md.names[md.page] = ascii(p, 1, #p); return true end
   if rcmd == M.MSP_FC_VARIANT then
     m.variant = ascii(p, 1, 4)
   elseif rcmd == M.MSP_FC_VERSION then
@@ -317,32 +382,110 @@ local function fmCurrent()
   return type(fm) == "string" and fm ~= ""
 end
 
+-- Filename of the active model, nil when unknown.
+local function activeModel()
+  local ok, info = pcall(model.getInfo)
+  return ok and type(info) == "table" and info.filename or nil
+end
+
+-- Switch page: the modes the FC sent, stored per model in the config
+-- (modes[filename] = { fw, version, date, ranges }); written only when they
+-- differ from the stored ones (the date alone does not count).
+local function sameModes(a, b)
+  if not a or not b or a.fw ~= b.fw or a.version ~= b.version then return false end
+  local ra, rb = a.ranges or {}, b.ranges or {}
+  if #ra ~= #rb then return false end
+  for i, r in ipairs(ra) do
+    local s = rb[i]
+    if r.name ~= s.name or r.aux ~= s.aux or r.lo ~= s.lo or r.hi ~= s.hi then return false end
+  end
+  return true
+end
+local function today()
+  local d = getDateTime and getDateTime()
+  return (d and d.year) and string.format("%04d-%02d-%02d", d.year, d.mon, d.day) or nil
+end
+-- file: the model the read started on (default the active one).
+local function storeModes(w, entry, file)
+  if sameModes(w.modesEntry, entry) then return end
+  entry.date = today()
+  local cfg
+  file, cfg = file or activeModel(), M.loadConfig()
+  if not file or not cfg then return end   -- a damaged config stays untouched
+  cfg.modes[file] = entry
+  if M.saveConfig(cfg) then w.modesEntry = entry end
+end
+
+-- Next request of the mode read (ranges, then ids and names page by page;
+-- Betaflight pages hold 32 modes), nil when all are in.
+local function modesRequest(m)
+  local md = m.modes
+  if not md.ranges then return M.MSP_MODE_RANGES end
+  local data = (m.variant == "BTFL") and { md.page } or nil
+  if not md.ids[md.page] then return M.MSP_BOXIDS, data end
+  if not md.names[md.page] then return M.MSP_BOXNAMES, data end
+  if data and #md.ids[md.page] >= BOX_PAGE and md.page < 3 then
+    md.page = md.page + 1
+    return modesRequest(m)
+  end
+  return nil
+end
+local MODES_CMD = { [M.MSP_MODE_RANGES] = true, [M.MSP_BOXIDS] = true, [M.MSP_BOXNAMES] = true }
+local MODES_TRIES = 3   -- mode requests lost in a row before the read gives up for this link
+
 -- One MSP step per tick: drop a request after its timeout, then send the next
 -- when the CRSF module takes one. Without any reply 10 s after the FC's first FM
--- text it gives up until the next link (a booting FC is still asked). Results:
--- w.fcInfo, w.armReason.
+-- text it gives up until the next link (a booting FC is still asked); with the
+-- switch page on and an ArduPilot FM text it stores that the modes cannot be
+-- read. Results: w.fcInfo, w.armReason, the stored modes (switch page on).
 local function pollMsp(w, now, armed)
   if not w.linkUp or armed or not crossfireTelemetryPush then return end
   w.msp = w.msp or { seq = 0 }
   local m = w.msp
   if not m.fmAt and fmCurrent() then m.fmAt = now end
-  if m.waiting and now - m.sentAt >= MSP_TIMEOUT then m.waiting = nil end
+  if m.waiting and now - m.sentAt >= MSP_TIMEOUT then
+    -- An FC that never answers a mode request: give up for this link, store nothing.
+    if MODES_CMD[m.waiting] then
+      m.modeLost = (m.modeLost or 0) + 1
+      if m.modeLost >= MODES_TRIES then m.modesDone, m.modes = true, nil end
+    end
+    m.waiting = nil
+  end
   if not w.armBlocked then m.reason, m.reasonAt = nil, nil end
-  if m.waiting or (not m.answered and m.fmAt and now - m.fmAt >= MSP_GIVE_UP_T) then return end
+  -- A mode reply takes several chunks; the GPS core's next PDOP request (every
+  -- second on the ground) would cut it off at the FC, so it is paused meanwhile.
+  local g, gm = w.gps, w.mods.gps
+  if m.waiting and MODES_CMD[m.waiting] and g and gm and gm.mspPause then gm.mspPause(g, (now + MSP_TIMEOUT) * 10) end
+  if m.waiting then return end
+  if not m.answered and m.fmAt and now - m.fmAt >= MSP_GIVE_UP_T then
+    if w.switchPage and (w.fcGuess == "AP" or (g and g.fcKind == "AP")) and not m.apStored then
+      m.apStored = true
+      storeModes(w, { fw = "AP" })
+    end
+    return
+  end
   -- The GPS core asks for its PDOP every second on the ground: send only while
   -- its request is answered and its next one is at least 0.5 s away.
-  local g = w.gps
-  if g and g.dopWaiting then return end
-  if g and g.dopGround and g.dopSentAt and now * 10 - g.dopSentAt > 500 then return end
-  local cmd
+  if g and gm and gm.mspFree and not gm.mspFree(g, now * 10) then return end
+  local cmd, data
   if not m.variant then cmd = M.MSP_FC_VARIANT
   elseif not m.version then cmd = M.MSP_FC_VERSION
   elseif not m.board then cmd = M.MSP_BOARD_INFO
   elseif w.armBlocked and (not m.reasonAt or now - m.reasonAt >= REASON_EVERY) then
     if m.variant == "BTFL" then cmd = M.MSP_STATUS_EX elseif m.variant == "INAV" then cmd = M.MSP2_INAV_STATUS end
   end
+  if not cmd and w.switchPage and not m.modesDone and (m.variant == "BTFL" or m.variant == "INAV") then
+    m.modes = m.modes or { ids = {}, names = {}, page = 0, file = activeModel() }
+    cmd, data = modesRequest(m)
+    if not cmd then
+      m.modesDone = true
+      storeModes(w, { fw = m.variant, version = m.version,
+                      ranges = M.modeRanges(m.modes.ranges, m.modes.ids, m.modes.names) }, m.modes.file)
+      m.modes = nil
+    end
+  end
   if not cmd or not crossfireTelemetryPush() then return end   -- false: buffer busy
-  crossfireTelemetryPush(MSP_REQ, M.mspRequest(m.seq, cmd))
+  crossfireTelemetryPush(MSP_REQ, M.mspRequest(m.seq, cmd, MODES_CMD[cmd], data))
   m.seq, m.waiting, m.sentAt = (m.seq + 1) % 16, cmd, now
   if cmd == M.MSP_STATUS_EX or cmd == M.MSP2_INAV_STATUS then m.reasonAt = now end
 end
@@ -372,6 +515,8 @@ local function updatePhase(w, now)
     w.alert = alertFromFM and alertFromFM(fm) or nil
     armed = armedFromFM(w.fm, fm)
     w.armBlocked = not armed and M.armBlockedFM(fm)
+    local fcFromFM = w.mods.gps and w.mods.gps.fcFromFM
+    w.fcGuess = (fcFromFM and fcFromFM(fm)) or w.fcGuess   -- firmware from the FM text (switch page)
     pollMsp(w, now, armed)
     w.fcInfo = fcInfoText(w.msp)
     w.armReason = w.armBlocked and w.msp and w.msp.reason or nil
@@ -379,7 +524,7 @@ local function updatePhase(w, now)
   local phase, event = flightPhase(w.fs, up, armed, w.preReady, now * 10)
   if event == "end" or event == "lost" then
     w.mode, w.alert, w.armBlocked = nil, nil, nil
-    w.msp, w.fcInfo, w.armReason = nil, nil, nil   -- a new link may be another FC
+    w.msp, w.fcInfo, w.armReason, w.fcGuess = nil, nil, nil, nil   -- a new link may be another FC
   end
   -- Lost while armed (dropout at range): the FC stays armed and its text has no
   -- marker on the way back, so the proof is kept for the resumed flight.
@@ -650,19 +795,25 @@ end
 
 -- Stick hold: aileron held full to one side (sign 1 right, -1 left) for a
 -- second with the elevator centred, armed again only after the aileron came
--- back to the centre. Returns the hold 0..1 and true once complete.
-local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD = 700, 200, 100   -- stick units, getTime units
+-- back to the centre. Returns the hold 0..1 and true once complete: the full
+-- hold is returned at least once and kept CLOSE_SHOW before it completes, so
+-- the bar is always seen full before the page changes.
+local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 700, 200, 100, 10   -- stick units, getTime units
 local function pollHold(w, now, sign)
   local ail, ele = getValue("ail") or 0, getValue("ele") or 0
   if math.abs(ail) < CLOSE_DEAD then w.closeArmed = true end
   if w.closeArmed and sign * ail > CLOSE_AIL and math.abs(ele) < CLOSE_DEAD then
     w.closeSince = w.closeSince or now
     if now - w.closeSince >= CLOSE_HOLD then
-      w.closeSince, w.closeArmed = nil, false
-      return 0, true
+      if w.closeFullAt and now - w.closeFullAt >= CLOSE_SHOW then
+        w.closeSince, w.closeFullAt, w.closeArmed = nil, nil, false
+        return 0, true
+      end
+      w.closeFullAt = w.closeFullAt or now
+      return 1, false
     end
   else
-    w.closeSince = nil
+    w.closeSince, w.closeFullAt = nil, nil
   end
   return w.closeSince and math.min(1, (now - w.closeSince) / CLOSE_HOLD) or 0, false
 end
@@ -687,13 +838,83 @@ local function startSearch(w)
   w.searching, w.finderMuted = true, nil
 end
 
+-- Switch page data from /SCRIPTS/WINGMAN/switches.lua, loaded only while the
+-- page is open. A widget call runs tick and drawing within 20,000 Lua
+-- instructions, so the static part (switches, mixes, special functions) is
+-- read once per opening, one step per tick, and the view is built again only
+-- when a switch, its channel or the stored modes change. Meanwhile the page
+-- shows only its frame (SWITCHES_LOADING). Returns the view, or false when
+-- switches.lua is missing (then w.swMissing: no switch gesture offered).
+local SWITCHES_LOADING = { loading = true, rows = {} }
+local function switchView(w)
+  if w.swMod == nil then
+    local chunk = loadScript("/SCRIPTS/WINGMAN/switches.lua")
+    w.swMod = chunk and chunk() or false
+    if not w.swMod then w.swMissing = true; return false end
+    return SWITCHES_LOADING   -- loading the file is this tick's work
+  end
+  if not w.swMod then return false end
+  if not w.swStatic then
+    w.swBuild = w.swBuild or {}
+    w.swStatic = w.swMod.buildStep(w.swBuild, getVersion and select(2, getVersion()))
+    if not w.swStatic then return SWITCHES_LOADING end
+    w.swBuild = nil
+    return SWITCHES_LOADING   -- the view on the next tick
+  end
+  local key = w.swMod.stateKey(w.swStatic)
+  if not w.swView or key ~= w.swKey or w.modesEntry ~= w.swModesOf then
+    w.swView, w.swKey, w.swModesOf = w.swMod.view(w.swStatic, w.modesEntry), key, w.modesEntry
+  end
+  return w.swView
+end
+
+local function closeSwitches(w)
+  w.switchOpen, w.sw, w.swMod, w.swStatic, w.swBuild, w.swView, w.swKey, w.swModesOf =
+    nil, nil, nil, nil, nil, nil, nil, nil
+end
+
+-- Wait page gestures, aileron held a second: left reopens the last summary for
+-- ENDED_HOLD_T (while one is kept), right opens the switch page (switch page
+-- on, no setup error); on the switch page left closes it. w.waitHold -1..1
+-- (negative while held left) for the hint bar, w.waitHint the gestures offered.
+local function waitGestures(w, now)
+  if w.switchOpen then
+    local hold, done = pollHold(w, now, -1)
+    w.waitHold = -hold
+    if done or not w.switchPage or w.setupError then closeSwitches(w)
+    else
+      w.sw = switchView(w)
+      if w.sw then return end
+      closeSwitches(w)
+    end
+  end
+  if w.reviewAt and now * 10 - w.reviewAt < ENDED_HOLD_T then
+    w.phase, w.post = M.ENDED, w.postKeep
+    return
+  end
+  w.reviewAt = nil
+  local review, switches = w.postKeep ~= nil, w.switchPage and not w.setupError and not w.swMissing
+  if not review and not switches then return end
+  w.waitHint = { review = review, switches = switches }
+  local sign = (getValue("ail") or 0) < 0 and -1 or 1
+  local allowed = (sign < 0 and review) or (sign > 0 and switches)
+  local hold, done = pollHold(w, now, allowed and sign or 0)
+  w.waitHold = sign * hold
+  if done and sign < 0 then
+    w.reviewAt, w.phase, w.post = now * 10, M.ENDED, w.postKeep
+  elseif done then
+    w.switchOpen, w.sw = true, SWITCHES_LOADING   -- the reading starts on the next tick
+  end
+end
+
 -- Pages from the cores. connected: link up (before the waiting overrides).
 -- The search page is sticky (w.searching): it starts when the model comes to
 -- rest far from home after a flight (disarmed far out, or the link lost with
 -- the last position far out) and ends only on the close gesture or on arming.
 local function buildPages(w, on, now, connected)
-  w.flight, w.pre, w.search, w.post, w.waitSub, w.reviewHold = nil, nil, nil, nil, nil, nil
-  w.preReady = false
+  w.flight, w.pre, w.search, w.post, w.waitSub = nil, nil, nil, nil, nil
+  w.waitHold, w.waitHint, w.sw, w.preReady = nil, nil, nil, false
+  if w.phase ~= M.WAITING or w.searching then closeSwitches(w) end
   local disarmed = w.lastArmed and not w.armed   -- armed -> disarmed edge
   w.lastArmed = w.armed
   if connected then
@@ -743,15 +964,8 @@ local function buildPages(w, on, now, connected)
   elseif w.phase == M.ENDED then
     w.post = postView(w, on)
     w.postKeep = w.post
-  elseif w.phase == M.WAITING and w.postKeep then   -- aileron held left: the last summary for ENDED_HOLD_T again
-    local done
-    w.reviewHold, done = pollHold(w, now, -1)   -- 0..1 for the wait page's hint bar
-    if done then w.reviewAt = now * 10 end
-    if w.reviewAt and now * 10 - w.reviewAt < ENDED_HOLD_T then
-      w.phase, w.post = M.ENDED, w.postKeep
-    else
-      w.reviewAt = nil
-    end
+  elseif w.phase == M.WAITING then
+    waitGestures(w, now)
   end
 end
 
@@ -898,13 +1112,15 @@ function M.addLevels(w)
   if w.search then w.search.satsLevel = lv(gps.satsLevel, w.search.sats) end
 end
 
--- Page data from the demo: ("flight", view), ("pre", preflight data), ("post", summary) or ("search", position source).
+-- Page data from the demo: ("flight", view), ("pre", preflight data), ("post", summary),
+-- ("switches", switch page view, with "hint" the wait page's hint) or ("search", position source).
 local function updateDemo(w, now)
-  w.search, w.flight, w.pre, w.post = nil, nil, nil, nil
+  w.search, w.flight, w.pre, w.post, w.sw, w.waitHint, w.waitHold = nil, nil, nil, nil, nil, nil, nil
   local kind, data
   -- DEMO may name the page ("flight", "search"); true takes the demo's default.
   if w.demo then kind, data = w.demo(w, now, M, type(M.DEMO) == "string" and M.DEMO or nil) end
   if kind == "flight" then w.flight = data end
+  if kind == "switches" then w.sw = data.view; w.waitHint, w.waitHold = data.hint, data.hold end
   if kind == "post" then w.post = data end
   if kind == "pre" then
     w.pre = data
@@ -919,7 +1135,9 @@ end
 
 -- ---------------------------------------------------------------------------
 -- Settings: module switches per model, { models = { [filename] = { gps = false } } }.
--- Only switched-off modules are stored; a missing file means all on. The path
+-- Only switched-off modules are stored; a missing file means all on. Next to
+-- models the switch page's modes per model (modes = { [filename] = ... },
+-- written by the core after reading them from the FC). The path
 -- is not written as `M.CONFIG_PATH = "..."` on purpose: the settings tool would
 -- then ask to create the file.
 -- ---------------------------------------------------------------------------
@@ -935,7 +1153,7 @@ M.GPS_VIEWS = { "compass", "horizon" }      -- flight page GPS column, first = d
 
 function M.defaultConfig()
   return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1],
-           flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1] }
+           flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1], switchPage = true, modes = {} }
 end
 
 -- Returns the config, or nil plus "parse" | "schema" (and a detail text).
@@ -954,6 +1172,8 @@ function M.loadConfig()
   if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
   if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
   if cfg.gpsView ~= M.GPS_VIEWS[2] then cfg.gpsView = M.GPS_VIEWS[1] end
+  cfg.switchPage = cfg.switchPage ~= false
+  if type(cfg.modes) ~= "table" then cfg.modes = {} end   -- switch page: FC modes by model file
   return cfg
 end
 
@@ -1006,22 +1226,19 @@ function M.setModules(cfg, filename, on)
   cfg.models[filename] = m
 end
 
-local function activeModel()
-  local ok, info = pcall(model.getInfo)
-  return ok and type(info) == "table" and info.filename or nil
-end
-
 -- Switches of the active model, the mascot, the flight time and GPS view choice, re-read every 5 s (a
 -- change in the settings tool or a model switch applies without a reload). A damaged
 -- file: all on, default mascot, flight time and GPS view.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
   w.onAt = now
-  local cfg = M.loadConfig()
-  w.on = M.modules(cfg, activeModel())
+  local cfg, file = M.loadConfig(), activeModel()
+  w.on = M.modules(cfg, file)
   w.mascot = cfg and cfg.mascot
   w.flightTime = cfg and cfg.flightTime
   w.gpsView = cfg and cfg.gpsView
+  w.switchPage = not cfg or cfg.switchPage
+  w.modesEntry = cfg and file and cfg.modes[file] or nil
   return w.on
 end
 
@@ -1123,7 +1340,8 @@ function M.tick(w, on)
   end
   w.setupError = #w.setupErrors > 0 or w.appErr
   if w.setupError then
-    w.phase, w.flight, w.pre, w.search, w.post = M.WAITING, nil, nil, nil, nil
+    w.phase, w.flight, w.pre, w.search, w.post, w.waitHint = M.WAITING, nil, nil, nil, nil, nil
+    closeSwitches(w)
     clearQr(w)
   end
   -- Finder after the setup check, so a hidden search page stays silent. Input:

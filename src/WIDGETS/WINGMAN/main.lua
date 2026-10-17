@@ -47,6 +47,9 @@ local DARK = {
   halo   = lcd.RGB( 70,  26,  26),
   head   = lcd.RGB( 27,  30,  27),   -- wait page mascot
   disc   = lcd.RGB( 45,  74,  23),   -- spinning props, accent at 30 %
+  swCur  = rgb(DARK_RGB.track),      -- switch page: current position
+  swTile = lcd.RGB( 50,  53,  50),   -- switch page: tile behind a position's symbol
+  swOnAccent = rgb(DARK_RGB.panel),  -- switch page: symbol on the accent tile
 }
 local LIGHT = {
   transparent = true,
@@ -61,6 +64,9 @@ local LIGHT = {
   head   = lcd.RGB(205, 235, 190),   -- wait page mascot, light green
   eyeRing = lcd.RGB( 90,  90,  90),  -- white eyes need an outline on the light head
   disc   = lcd.RGB(195, 228, 175),   -- spinning props
+  swCur  = lcd.RGB(165, 165, 172),   -- switch page: current position on the box colour
+  swTile = lcd.RGB(225, 225, 230),
+  swOnAccent = lcd.RGB(255, 255, 255),
 }
 local WARN_RGB, CRIT_RGB = { 255, 180, 0 }, { 220, 40, 40 }
 local WARN_COL, CRIT_COL = rgb(WARN_RGB), rgb(CRIT_RGB)
@@ -192,10 +198,11 @@ end
 local function fillRounded(x, y, w, h, r, color)
   lcd.drawFilledRectangle(x + r, y, w - 2 * r, h, color)
   lcd.drawFilledRectangle(x, y + r, w, h - 2 * r, color)
-  for _, c in ipairs({ { x + r, y + r }, { x + w - r - 1, y + r },
-                       { x + r, y + h - r - 1 }, { x + w - r - 1, y + h - r - 1 } }) do
-    lcd.drawFilledCircle(c[1], c[2], r, color)
-  end
+  local x2, y2 = x + w - r - 1, y + h - r - 1
+  lcd.drawFilledCircle(x + r, y + r, r, color)
+  lcd.drawFilledCircle(x2, y + r, r, color)
+  lcd.drawFilledCircle(x + r, y2, r, color)
+  lcd.drawFilledCircle(x2, y2, r, color)
 end
 
 -- Bar fill of width w in a track with corner radius r. Two radii or wider:
@@ -226,6 +233,57 @@ local function drawCornerBar(z, txt, frac, color)
   local fw = math.floor(barW * math.min(1, math.abs(frac)))
   if fw >= barH then fillRounded(frac < 0 and bx + barW - fw or bx, by, fw, barH, math.floor(barH / 2), color) end
   dtext(bx - sc(12) - textW(txt, SMLSIZE), by + math.floor((barH - fontH(SMLSIZE)) / 2), txt, COLORS.muted, SMLSIZE)
+end
+
+-- Aileron gesture hint, bottom centre: a stick symbol whose knob moves with the
+-- hold (hold -1..1, negative held left), a button left and right of it (label
+-- or nil) that fills from the stick outwards while held, centred on cx (default
+-- the zone's middle). Design px for 800 wide. Returns the hint's top.
+local function drawStickHint(z, left, right, hold, cx)
+  local kx = z.w / 800
+  local k = math.min(kx, (z.h - HDR_H) / 418)
+  local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
+  local h, bw, gap, line = sc(30), math.floor(120 * kx + 0.5), sc(14), sc(2)
+  local r = math.max(2, sc(6))
+  local y = z.h - sc(6) - h
+  cx = cx or math.floor(z.w / 2)
+  local ix = cx - math.floor(h / 2)
+  local cy = y + math.floor(h / 2)
+  -- Stick: outline, cross, knob (accent while held).
+  fillRounded(ix, y, h, h, r, COLORS.muted)
+  fillRounded(ix + line, y + line, h - 2 * line, h - 2 * line, math.max(1, r - line), COLORS.panel or COLORS.box)
+  lcd.drawFilledRectangle(cx, y + sc(6), 1, h - 2 * sc(6), COLORS.track)
+  lcd.drawFilledRectangle(ix + sc(6), cy, h - 2 * sc(6), 1, COLORS.track)
+  local off = math.floor(sc(6) * math.max(-1, math.min(1, hold * 1.6)) + 0.5)
+  -- hold > 0 or < 0, not ~= 0: on the radio a hold of 0.75 compared equal to 0.
+  lcd.drawFilledCircle(cx + off, cy, math.max(2, sc(4)), (hold > 0 or hold < 0) and COLORS.accent or COLORS.muted)
+  -- Buttons: border accent while held towards them, filled from the stick side.
+  local ah, aw = sc(12), sc(10)
+  for side = -1, 1, 2 do
+    local label = right
+    if side < 0 then label = left end   -- not "and/or": a missing left must stay nil
+    if label then
+      local bx = side < 0 and ix - gap - bw or ix + h + gap
+      local frac = math.max(0, math.min(1, hold * side))
+      fillRounded(bx, y, bw, h, r, frac > 0 and COLORS.accent or COLORS.track)
+      fillRounded(bx + line, y + line, bw - 2 * line, h - 2 * line, math.max(1, r - line), COLORS.box)
+      local fw = math.floor((bw - 2 * line) * frac)
+      if fw > 0 then
+        lcd.drawFilledRectangle(side < 0 and bx + bw - line - fw or bx + line, y + line, fw, h - 2 * line, COLORS.trail)
+      end
+      local tw = textW(label, SMLSIZE)
+      local tx = bx + math.floor((bw - tw - aw - sc(8)) / 2)
+      local ay = cy - math.floor(ah / 2)
+      if side < 0 then
+        fillTri(tx + aw, ay, tx, cy, tx + aw, ay + ah, COLORS.fg)
+        tx = tx + aw + sc(8)
+      else
+        fillTri(tx + tw + sc(8), ay, tx + tw + sc(8) + aw, cy, tx + tw + sc(8), ay + ah, COLORS.fg)
+      end
+      dtext(tx, cy, label, COLORS.fg, SMLSIZE + VCENTER)
+    end
+  end
+  return y
 end
 
 -- Flight mode field and ARMED field on fixed slots: the mode
@@ -502,15 +560,23 @@ local function flightLayout(z)
 end
 
 -- Speaker glyph h px high, left edge x, centred on cy; accent while lit (a finder beep),
--- struck through when muted.
-local function drawSpeaker(x, cy, h, lit, muted)
-  local col = lit and COLORS.accent or COLORS.muted
-  local bw, bt = math.max(2, math.floor(h * 0.25)), math.max(2, math.floor(h * 0.2))
-  local cw, ch = math.max(3, math.floor(h * 0.45)), math.floor(h * 0.45)
-  lcd.drawFilledRectangle(x, cy - bt, bw, 2 * bt, col)
-  fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col)
-  fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col)
-  if muted then thickLine(x - 1, cy + ch, x + bw + cw, cy - ch, COLORS.fg) end
+-- struck through when muted. The sizes per h are kept (the switch page draws many).
+local drawSpeaker
+do
+  local geo = {}
+  function drawSpeaker(x, cy, h, lit, muted)
+    local col = lit and COLORS.accent or COLORS.muted
+    local g = geo[h]
+    if not g then
+      g = { math.max(2, math.floor(h * 0.25)), math.max(2, math.floor(h * 0.2)), math.max(3, math.floor(h * 0.45)), math.floor(h * 0.45) }
+      geo[h] = g
+    end
+    local bw, bt, cw, ch = g[1], g[2], g[3], g[4]
+    lcd.drawFilledRectangle(x, cy - bt, bw, 2 * bt, col)
+    fillTri(x + bw, cy - bt, x + bw + cw, cy - ch, x + bw + cw, cy + ch, col)
+    fillTri(x + bw, cy - bt, x + bw + cw, cy + ch, x + bw, cy + bt, col)
+    if muted then thickLine(x - 1, cy + ch, x + bw + cw, cy - ch, COLORS.fg) end
+  end
 end
 
 -- Finder strength 0..1 as 20 segments over w.
@@ -531,11 +597,10 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local x, y, right, bottom = x0 + p, y0 + p, x0 + pw - p, y0 + ph - p
   local fh = fontH(SMLSIZE)
 
-  -- Bottom row, always reserved: the two aileron holds (mute left, close right),
-  -- the hold as a bar at the bottom right filling towards the held side.
-  local hint = ctx.w.finderMuted and "ail hold: < sound  close >" or "ail hold: < mute  close >"
-  drawCornerBar(ctx.zone, hint, ctx.w.searchHold or 0, COLORS.accent)
-  bottom = bottom - fh - p
+  -- Bottom row, always reserved: the two aileron holds (mute left, close right).
+  local top = drawStickHint(ctx.zone, ctx.w.finderMuted and "Sound on" or "Mute", "Close", ctx.w.searchHold or 0,
+                            x0 + math.floor(pw / 2))
+  bottom = math.min(bottom - fh, top) - p
 
   -- Title with the accent square of the column titles, bold like Lipo Nanny's
   -- SELECT PACK; LINK LOST tag while the position is not live.
@@ -1516,22 +1581,82 @@ local function fitFrom(s, first, maxW, font)
   return string.sub(s, first, lo)
 end
 
--- The part of name to show at time t (getTime units since the row got the cursor).
-local function marqueeText(name, maxW, t, font)
-  if textW(name, font) <= maxW then return name end
-  local starts = {}
-  for i = 1, #name do
-    if not isContByte(name, i) then starts[#starts + 1] = i end
-  end
-  local lo, hi = 1, #starts
+-- Scroll steps until the end of name fits maxW (0: the whole name fits), one
+-- per byte: a multi-byte character just holds its place one step longer.
+local function marqueeSteps(name, maxW, font)
+  if textW(name, font) <= maxW then return 0 end
+  local lo, hi = 1, #name
   while lo < hi do
     local mid = math.floor((lo + hi) / 2)
-    if textW(string.sub(name, starts[mid]), font) <= maxW then hi = mid else lo = mid + 1 end
+    if textW(string.sub(name, mid), font) <= maxW then hi = mid else lo = mid + 1 end
   end
-  local steps = lo - 1
+  return lo - 1
+end
+
+-- First byte shown at time t: one step per MARQUEE_STEP, MARQUEE_PAUSE steps
+-- at the start and the end, never inside a multi-byte character.
+local function marqueeFirst(name, t, steps)
   local pos = math.floor(t / MARQUEE_STEP) % (steps + 2 * MARQUEE_PAUSE) - MARQUEE_PAUSE
-  if pos < 0 then pos = 0 elseif pos > steps then pos = steps end
-  return fitFrom(name, starts[pos + 1], maxW, font)
+  local first = math.max(0, math.min(steps, pos)) + 1
+  while isContByte(name, first) do first = first + 1 end
+  return first
+end
+
+-- The part of name to show at time t (getTime units since the row got the cursor).
+local function marqueeText(name, maxW, t, font)
+  local steps = marqueeSteps(name, maxW, font)
+  if steps == 0 then return name end
+  return fitFrom(name, marqueeFirst(name, t, steps), maxW, font)
+end
+
+-- KEPT.marquee and KEPT.cut: as marqueeText and cutText, but each text measured
+-- once per width and font (the switch page draws many texts every frame); the
+-- memo starts over at KEPT.max texts. Measuring is spread over frames: at most
+-- KEPT.left new measurements per frame (set by the caller), the next marquee
+-- step measured ahead; past that nil (KEPT.missed) or the last marquee step.
+local KEPT = { memo = {}, n = 0, max = 400, left = 0 }
+-- A new memo slot for key when this frame may still measure, else nil.
+local function keptSlot(key)
+  if KEPT.left <= 0 then KEPT.missed = true; return false end
+  if KEPT.n >= KEPT.max then KEPT.memo, KEPT.n = {}, 0 end
+  KEPT.n, KEPT.left = KEPT.n + 1, KEPT.left - 1
+  return true
+end
+function KEPT.marquee(name, maxW, t, font)
+  local key = font .. "|" .. maxW .. "|" .. name
+  local m = KEPT.memo[key]
+  if not m then
+    if not keptSlot(key) then return nil end
+    m = { steps = marqueeSteps(name, maxW, font) }
+    KEPT.memo[key] = m
+  end
+  if m.steps == 0 then return name end
+  local step = math.floor(t / MARQUEE_STEP)
+  if m.at == step then return m.last end
+  local first = marqueeFirst(name, t, m.steps)
+  local part = m[first]
+  if not part then
+    if KEPT.left <= 0 then KEPT.missed = KEPT.missed or not m.last; return m.last end
+    part, KEPT.left = fitFrom(name, first, maxW, font), KEPT.left - 1
+    m[first] = part
+  end
+  m.last, m.at = part, step
+  if m.ahead ~= first and KEPT.left > 0 then   -- once per step: the next one
+    local nxt = marqueeFirst(name, t + MARQUEE_STEP, m.steps)
+    if not m[nxt] then m[nxt], KEPT.left = fitFrom(name, nxt, maxW, font), KEPT.left - 1 end
+    m.ahead = first
+  end
+  return part
+end
+function KEPT.cut(text, maxW, font)
+  local key = "cut|" .. font .. "|" .. maxW .. "|" .. text
+  local c = KEPT.memo[key]
+  if not c then
+    if not keptSlot(key) then return nil end
+    c = cutText(text, "", maxW, font)
+    KEPT.memo[key] = c
+  end
+  return c
 end
 
 -- Pack selection inside the battery column: window around the cursor, confirm
@@ -2148,9 +2273,124 @@ local function drawWait(ctx)
   dtext(tx, ty, WAIT_TITLE .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
   dtext(cx, ty + th, (ctx.w and ctx.w.waitSub) or WAIT_SUB, COLORS.muted, SMLSIZE + CENTER)
 
-  -- While a summary is kept: the gesture to reopen it, the hold as a bar.
-  local hold = ctx.w and ctx.w.reviewHold
-  if hold then drawCornerBar(z, "ail: hold < last flight", hold, COLORS.accent) end
+  -- Gestures: the last summary (while one is kept) and the switch page.
+  local hint = ctx.w and ctx.w.waitHint
+  if hint then
+    drawStickHint(z, hint.review and "Last flight" or nil, hint.switches and "Switches" or nil, ctx.w.waitHold or 0)
+  end
+end
+
+-- Switch page: title with the source of the modes, the switches as cards in
+-- rows of four (two left, two right, as on the radio), each with its channel
+-- and per position the FC's modes and the special functions, the current
+-- position on a darker band; bottom right the gesture back.
+local SW_GAP = { card = 10, side = 22 }   -- design px between cards, between the two sides
+-- dry: measure only (texts for KEPT), nothing drawn.
+local function drawSwitchCard(c, x, y, w, h, wide, now, dry)
+  local pad = math.max(3, math.floor(8 * w / 180 + 0.5))
+  if not dry then fillRounded(x, y, w, h, math.max(2, math.floor(pad * 0.75)), COLORS.box) end
+  local fName, fRow = wide and BOLD or SMLSIZE, SMLSIZE
+  local nh, lh = fontH(fName), fontH(fRow)
+  local right, bottom = x + w - pad, y + h - math.floor(pad / 2)
+  local fSym = SMLSIZE
+  -- Widths kept on the card while its view and size stay (the tag once measured).
+  local lay = c.lay
+  if not lay or lay.w ~= w or lay.wide ~= wide then
+    local tag = c.tag
+    local nameW = textW(c.name, fName)
+    if textW(tag, SMLSIZE) > w - 3 * pad - nameW then tag = c.tagShort or tag end
+    tag = KEPT.cut(tag, math.max(0, w - 3 * pad - nameW), SMLSIZE)
+    lay = { w = w, wide = wide, tag = tag, tagW = tag and textW(tag, SMLSIZE), symW = textW("W", fRow) + pad, sym = {} }
+    for i, p in ipairs(c.pos) do lay.sym[i] = textW(p.sym, fSym) end
+    if tag then c.lay = lay end
+  end
+  if not dry then
+    dtext(x + pad, y + pad, c.name, COLORS.fg, fName)
+    if lay.tag then dtext(right - lay.tagW, y + pad + nh - fontH(SMLSIZE), lay.tag, COLORS.muted, SMLSIZE) end
+  end
+  local symW = lay.symW
+  local half = math.floor(pad / 2)
+  local tileX, tileW, inset = x + pad, symW - half, math.max(1, math.floor(pad / 3))
+  local bandR = math.max(2, half)
+  local tx = x + pad + symW
+  local tw = right - tx
+  local gh = math.floor(lh * 0.6)
+  local playX, ghMid = tx + gh + half, math.floor(lh / 2)
+  local ty = y + pad + nh
+  -- Modes and special functions on separate lines; when that does not fit,
+  -- the functions beside modes only on the current position.
+  local need = 0
+  for _, p in ipairs(c.pos) do need = need + ((p.modes and p.sf) and 2 or 1) end
+  local all = ty + need * lh <= bottom
+  for i, p in ipairs(c.pos) do
+    local sf = p.sf
+    if p.modes and not (all or p.cur) then sf = nil end
+    local lines = (p.modes and sf) and 2 or 1
+    local lh2 = lines * lh
+    if ty + lh2 > bottom then break end
+    -- The symbol on a tile over all lines of its position, accent when current.
+    if not dry then
+      if p.cur then fillRounded(x + half, ty, w - pad, lh2, bandR, COLORS.swCur) end
+      local th = lh2 - 2 * inset
+      local col = p.cur and COLORS.accent or COLORS.swTile   -- two rectangles: 1 px corners, no circles
+      lcd.drawFilledRectangle(tileX + 1, ty + inset, tileW - 2, th, col)
+      lcd.drawFilledRectangle(tileX, ty + inset + 1, tileW, th - 2, col)
+      dtext(tileX + math.floor((tileW - lay.sym[i]) / 2), ty + inset + math.floor(th / 2),
+            p.sym, p.cur and COLORS.swOnAccent or COLORS.fg, fSym + VCENTER)
+    end
+    if p.modes then
+      local m = KEPT.marquee(p.modes, tw, now, fRow)
+      if m and not dry then dtext(tx, ty, m, COLORS.fg, fRow) end
+    end
+    if sf then
+      local sy, sx = p.modes and ty + lh or ty, tx
+      if p.play then
+        if not dry then drawSpeaker(sx, sy + ghMid, gh, false, false) end
+        sx = playX
+      end
+      local f = KEPT.marquee(sf, right - sx, now, fRow)
+      if f and not dry then dtext(sx, sy, f, COLORS.muted, fRow) end
+    end
+    ty = ty + lh2
+  end
+end
+
+local function drawSwitches(ctx)
+  local z, v, now = ctx.zone, ctx.w.sw, getTime()
+  if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
+  local L = flightLayout(z)
+  local wide = z.w >= 700
+  local x0, right = L.x(18), z.w - L.x(18)
+  drawTitle(L, x0, "SWITCHES")
+  -- After opening, the texts are measured over a few frames (cards not yet
+  -- drawn) so no frame measures them all; then a few new ones per frame.
+  if v.loading then KEPT.ready = false end
+  local dry = not KEPT.ready
+  KEPT.left, KEPT.missed = dry and 24 or 4, false
+  if v.src then
+    local titleR = x0 + L.s(19) + textW("SWITCHES", L.f.title) + L.x(16)
+    local src = KEPT.cut(v.src, right - titleR, SMLSIZE)
+    if src then rtext(right, L.y(31), src, COLORS.muted, SMLSIZE) end
+  end
+  local top = L.y(46)
+  local bottom = z.h - fontH(SMLSIZE) - L.s(26)
+  local gap, side = L.x(SW_GAP.card), L.x(SW_GAP.side)
+  local cw = math.floor((right - x0 - side - 2 * gap) / 4)
+  local n = math.max(1, #v.rows)
+  local rgap = L.s(SW_GAP.card)
+  local ch = math.floor((bottom - top - (n - 1) * rgap) / n)
+  for r, row in ipairs(v.rows) do
+    local y = top + (r - 1) * (ch + rgap)
+    for i = 1, 4 do
+      local c = row[i]
+      if c then
+        local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and (side - gap) or 0)
+        drawSwitchCard(c, x, y, cw, ch, wide, now, dry)
+      end
+    end
+  end
+  if dry and not v.loading and not KEPT.missed then KEPT.ready = true end
+  drawStickHint(z, "Back", nil, ctx.w.waitHold or 0)
 end
 
 -- Wingman's own core missing or failing: say so instead of an empty page.
@@ -2217,7 +2457,7 @@ local function refresh(ctx, event, touchState)
   end
 
   local w = ctx.w
-  local page = (not w and drawNoCore) or (ctx.fatalError and drawFatal) or (w.setupError and drawWait) or (w and w.flight and drawFlight) or (w and w.pre and drawPre)
+  local page = (not w and drawNoCore) or (ctx.fatalError and drawFatal) or (w.setupError and drawWait) or (w.sw and drawSwitches) or (w and w.flight and drawFlight) or (w and w.pre and drawPre)
                or (w and w.search and drawSearch) or (w and w.post and drawPost)
                or (w and w.phase == core.WAITING and drawWait) or drawSearch
   if not pcall(drawHeader, ctx) or not pcall(page, ctx) then

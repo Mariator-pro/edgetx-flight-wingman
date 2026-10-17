@@ -38,7 +38,7 @@ The start page lists the topic pages on top and the installed projects as icons 
 | **Batteries** | Your battery *profiles* (a type of battery) and their physical *packs*. | Lipo Nanny |
 | **Models** | Per model: cell count, single or parallel packs, assigned batteries, sensors, what Wingman shows. | Lipo Nanny, Flight Wingman |
 | **Last flights** | Where the model was when the telemetry ended, for the last three flights, with a QR code. | GPS Homer |
-| **Display** | What the widgets show (flight time, mascot, GPS view). | Flight Wingman, Lipo Nanny |
+| **Display** | What the widgets show (flight time, mascot, GPS view, switch page). | Flight Wingman, Lipo Nanny |
 
 Navigation: the rotary wheel moves the cursor, **Enter** opens a page (`>`) or edits a field, **Exit/RTN** goes
 back. On touch radios you can also tap the pages and icons of the start page. The line with the **i** at the
@@ -302,6 +302,7 @@ What the widgets show.
 | **Mascot** | The character on the waiting page, `Quad` (default) or `Scout`. |
 | **Flight time** | The small value beside the battery percentage on the flight page: `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying). |
 | **GPS view** | The layout of the flight page, `Compass` (default) or `Horizon` (large artificial horizon from the flight controller's pitch and roll). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds). |
+| **Switch page** | `On` (default): on the waiting page, hold the aileron stick right for a second to see every switch of the radio with its channel, the flight modes it switches on in Betaflight or INAV (read from the flight controller at each connection and kept per model) and the special functions on each position; hold it left to go back. `Off` hides the page and skips the reading. |
 
 **Lipo Nanny**
 

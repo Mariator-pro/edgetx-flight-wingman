@@ -28,6 +28,8 @@ return function(core)
       { key = "gpsView", page = "display", label = "GPS view", type = "choice",
         choices = core.GPS_VIEWS, labels = { "Compass", "Horizon" }, default = core.GPS_VIEWS[1],
         hint = "Horizon: set Telem Ratio to 1:4 or faster" },
+      { key = "switchPage", page = "display", label = "Switch page", type = "bool", default = true,
+        hint = "Switches and FC modes on the wait page (aileron right)" },
     },
   }
 end

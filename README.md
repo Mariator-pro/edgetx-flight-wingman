@@ -63,6 +63,7 @@ Three widgets side by side share a small screen, yet each phase of a flight need
 - **All warnings stay as they are:** the voice announcements and vibration of the three projects keep running, even when the widget is not on screen. Flight Wingman adds no warnings of its own.
 - **One ready check before take-off:** `GO` when battery, link and GPS are fine and the flight controller allows arming, otherwise `CHECK` with the reason (Betaflight and INAV name the arming block in plain text).
 - **Setup errors show up before you fly:** a missing core, an unconfigured model or a missing sensor keeps the waiting page with a hint, instead of warnings silently not playing.
+- **See what each switch does:** on the waiting page, aileron held right opens a page with every switch, its channel, the flight controller's modes and the sounds for each position (can be turned off in Flight Bag under Display).
 - **Not every model has GPS:** battery, link and GPS can be switched off per model; the remaining columns share the width.
 
 Besides the two flight views above, the widget shows a page for each other phase of a flight:
@@ -78,11 +79,17 @@ Besides the two flight views above, the widget shows a page for each other phase
   </tr>
   <tr>
     <td align="center"><img src="docs/img/widget-end.png" width="260" alt="Post-flight page with flight time, used capacity, distance and the flight's alerts"></td>
-    <td align="center"><img src="docs/img/widget-search.png" width="260" alt="Search page with radar map, distance, direction and QR code"></td>
+    <td align="center"><img src="docs/img/widget-switches.png" width="260" alt="Switch page with a card per switch, its channel, the flight controller's modes and the sounds for each position"></td>
   </tr>
   <tr>
     <td align="center"><b>Post-flight</b><br>the flight's summary and alerts, 30 s</td>
-    <td align="center"><b>Search</b><br>after landing far from home</td>
+    <td align="center"><b>Switches</b><br>every switch with its channel, the flight controller's modes and the sounds per position</td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><img src="docs/img/widget-search.png" width="260" alt="Search page with radar map, distance, direction and QR code"></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2"><b>Search</b><br>after landing far from home</td>
   </tr>
 </table>
 
@@ -173,6 +180,7 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 - **Close the search page:** aileron held right for 1 s.
 - **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
 - **Show the last post-flight page again:** on the waiting page, aileron held left for 1 s.
+- **Open the switch page:** on the waiting page, aileron held right for 1 s; aileron held left goes back.
 
 ---
 
