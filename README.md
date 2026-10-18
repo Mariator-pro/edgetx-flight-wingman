@@ -47,8 +47,6 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 
 Three widgets side by side share a small screen, yet each phase of a flight needs different values. Flight Wingman sorts by phase instead of by topic: before take-off it answers *"Am I ready to go?"*, in flight *"Do I have to react now?"*, after landing *"Did everything go well?"* and after a crash *"Where is the model?"*.
 
-https://github.com/user-attachments/assets/6f9da0cc-134d-47e7-8e10-acdd327a58a8
-
 <p align="center">
   <img src="docs/img/widget-carousel.gif" width="800" alt="Flight Wingman pages one after another: waiting, preflight, flight with compass, flight with horizon, post-flight, search and switches">
   <br>
