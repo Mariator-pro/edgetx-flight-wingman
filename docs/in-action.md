@@ -1,5 +1,11 @@
 # Flight Wingman in action
 
+Meet **Quad**, the Wingman mascot: it keeps you company on the waiting page and looks sad when something in the setup needs your attention.
+
+<p align="center">
+  <img src="img/mascot-quad.gif" width="420" alt="Quad, the Flight Wingman mascot: a green quadcopter with big eyes on its camera">
+</p>
+
 How the pages of Flight Wingman change during a flight, shown on a TX16S MK3.
 
 <p align="center">

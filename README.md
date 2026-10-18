@@ -47,16 +47,11 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 
 Three widgets side by side share a small screen, yet each phase of a flight needs different values. Flight Wingman sorts by phase instead of by topic: before take-off it answers *"Am I ready to go?"*, in flight *"Do I have to react now?"*, after landing *"Did everything go well?"* and after a crash *"Where is the model?"*.
 
-<table>
-  <tr>
-    <td align="center"><img src="docs/img/widget-flight.png" width="400" alt="Flight Wingman flight page with battery, GPS and link columns and the compass"></td>
-    <td align="center"><img src="docs/img/widget-flight-horizon.png" width="400" alt="Flight Wingman flight page with a large artificial horizon, speed and altitude tapes, battery and link at the sides"></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Flight, compass</b><br>three columns with the home arrow</td>
-    <td align="center"><b>Flight, horizon</b><br>large artificial horizon (<a href="docs/flightbag.md#display">Flight Bag: GPS view</a>)</td>
-  </tr>
-</table>
+<p align="center">
+  <img src="docs/img/widget-carousel.gif" width="800" alt="Flight Wingman pages one after another: waiting, preflight, flight with compass, flight with horizon, post-flight, search and switches">
+  <br>
+  <a href="docs/img/widget-waiting.png">Waiting</a> · <a href="docs/img/widget-preflight.png">Preflight</a> · <a href="docs/img/widget-flight.png">Flight, compass</a> · <a href="docs/img/widget-flight-horizon.png">Flight, horizon</a> · <a href="docs/img/widget-end.png">Post-flight</a> · <a href="docs/img/widget-search.png">Search</a> · <a href="docs/img/widget-switches.png">Switches</a>
+</p>
 
 - **One screen, three columns:** battery from Lipo Nanny, home arrow from GPS Homer, link from Link Sentinel, each with the same colors and thresholds as the single widget.
 - **Pages switch on their own**, no button needed: waiting, preflight, flight, post-flight and search.
@@ -65,33 +60,6 @@ Three widgets side by side share a small screen, yet each phase of a flight need
 - **Setup errors show up before you fly:** a missing core, an unconfigured model or a missing sensor keeps the waiting page with a hint, instead of warnings silently not playing.
 - **See what each switch does:** on the waiting page, aileron held right opens a page with every switch, its channel, the flight controller's modes and the sounds for each position (can be turned off in Flight Bag under Display).
 - **Not every model has GPS:** battery, link and GPS can be switched off per model; the remaining columns share the width.
-
-Besides the two flight views above, the widget shows a page for each other phase of a flight:
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/img/widget-waiting.png" width="260" alt="Waiting page with the mascot looking for the model"></td>
-    <td align="center"><img src="docs/img/widget-preflight.png" width="260" alt="Preflight page with battery, GPS, link and the ready check"></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Waiting</b><br>no telemetry yet</td>
-    <td align="center"><b>Preflight</b><br>pack selection and ready check</td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/img/widget-end.png" width="260" alt="Post-flight page with flight time, used capacity, distance and the flight's alerts"></td>
-    <td align="center"><img src="docs/img/widget-switches.png" width="260" alt="Switch page with a card per switch, its channel, the flight controller's modes and the sounds for each position"></td>
-  </tr>
-  <tr>
-    <td align="center"><b>Post-flight</b><br>the flight's summary and alerts, 30 s</td>
-    <td align="center"><b>Switches</b><br>every switch with its channel, the flight controller's modes and the sounds per position</td>
-  </tr>
-  <tr>
-    <td align="center" colspan="2"><img src="docs/img/widget-search.png" width="260" alt="Search page with radar map, distance, direction and QR code"></td>
-  </tr>
-  <tr>
-    <td align="center" colspan="2"><b>Search</b><br>after landing far from home</td>
-  </tr>
-</table>
 
 See the pages in motion, from the ready check to warnings and the search for a crashed model: [Flight Wingman in action](docs/in-action.md).
 
@@ -104,12 +72,6 @@ The two fields in the header show the flight controller's state on every page:
 | <img src="docs/img/header-mode-rth.png" width="56" alt="RTH on a yellow field"> <img src="docs/img/header-mode-land.png" width="56" alt="LAND on a yellow field"> | Return to home or automatic landing in progress (also `WRTH`, `RTL`, `SRTL`, `ARTL`, `QRTL` and `ALND`, `QLND`, `L2QL` from INAV and ArduPilot) |
 | <img src="docs/img/header-mode-failsafe.png" width="56" alt="!FS! on a red field"> | Failsafe |
 | <img src="docs/img/header-armed.png" width="55" alt="ARMED on a red field"> | Armed |
-
-Meet **Quad**, the Wingman mascot: it keeps you company on the waiting page and looks sad when something in the setup needs your attention.
-
-<p align="center">
-  <img src="docs/img/mascot-quad.gif" width="420" alt="Quad, the Flight Wingman mascot: a green quadcopter with big eyes on its camera">
-</p>
 
 ---
 
