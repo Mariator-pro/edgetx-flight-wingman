@@ -1,34 +1,39 @@
 -- Compass drawing for the GPS Homer widget and other widgets that load it
 -- (display only, no state between calls). Load with loadScript(path, "bt")().
 --
--- Ring band in track colour with ticks at the intercardinals and N E S W
--- outside it (N in the text colour), a notched arrow, a house on the letter
--- track towards home. Two modes:
+-- Dial face inside a ring band in track colour, ticks inside the band (every
+-- 10 degrees on large rings, else every 30; the cardinals lighter, N in the
+-- text colour), N E S W outside it (N bold), a notched two-tone arrow, a house
+-- on the letter track towards home. Two modes:
 --   North up: ring fixed, arrow = course, house = bearing to home.
 --   Nose up:  ring turns with the course, a fixed mark at 12 o'clock, the arrow
 --             points home (bearing relative to the course), no house.
 -- Without a course the ring holds north up, the house marks home and a crosshair
 -- replaces the arrow. Compact: the bare band (no letters, ticks or mark) for
 -- boxes too low for the letters, home as a dot on the band.
--- Colours: col = { track = ..., fg = ..., muted = ... } (lcd colour values).
+-- Colours: col = { track = ..., fg = ..., muted = ..., face = ... } (lcd colour
+-- values; face is the dial, none without it).
 
 local C = {}
 local FONT = SMLSIZE
+local N_FONT = BOLD or FONT   -- N a size larger and bold (bold exists only at standard size)
 
-local fh
-local widths = {}
-local function fontH()
-  if not fh then fh = select(2, lcd.sizeText("0", FONT)) end
-  return fh
+local heights = {}
+local widths = { [FONT] = {}, [N_FONT] = {} }
+local function fontH(f)
+  f = f or FONT
+  if not heights[f] then heights[f] = select(2, lcd.sizeText("0", f)) end
+  return heights[f]
 end
-local function textW(t)
-  local w = widths[t]
-  if not w then w = lcd.sizeText(t, FONT); widths[t] = w end
+local function textW(t, f)
+  f = f or FONT
+  local w = widths[f][t]
+  if not w then w = lcd.sizeText(t, f); widths[f][t] = w end
   return w
 end
-local function text(x, y, t, col)
+local function text(x, y, t, col, f)
   lcd.setColor(CUSTOM_COLOR, col)
-  lcd.drawText(x, y, t, CUSTOM_COLOR + FONT)
+  lcd.drawText(x, y, t, CUSTOM_COLOR + (f or FONT))
 end
 
 -- Point at radius r towards deg (0 = up, clockwise).
@@ -67,10 +72,36 @@ local function drawBand(cx, cy, R, rw, col)
   end
 end
 
--- Lines are 1 px in the Lua API: two side by side.
-local function thickLine(x1, y1, x2, y2, col)
+-- Lines are 1 px in the Lua API: w (1..3) side by side.
+local function thickLine(x1, y1, x2, y2, col, w)
   lcd.drawLine(x1, y1, x2, y2, SOLID, col)
-  lcd.drawLine(x1 + 1, y1, x2 + 1, y2, SOLID, col)
+  if (w or 2) >= 2 then lcd.drawLine(x1 + 1, y1, x2 + 1, y2, SOLID, col) end
+  if (w or 2) >= 3 then lcd.drawLine(x1 - 1, y1, x2 - 1, y2, SOLID, col) end
+end
+
+-- Ticks inside the band, turned by rotDeg: from a small gap under the band
+-- inwards, 30 degree ticks longer, the cardinals longest (N in fg, 3 px). The
+-- 10 degree ticks only from FINE_TICKS_R on (closer than about 6 px apart below).
+local FINE_TICKS_R = 40
+local function drawTicks(cx, cy, R, ri, rotDeg, col)
+  local r1 = ri - math.max(1, math.floor(R * 0.05 + 0.5))
+  local fine = R >= FINE_TICKS_R
+  for i = 0, 35 do
+    local a = i * 10 + rotDeg
+    if i % 9 == 0 then
+      local x1, y1 = pt(cx, cy, r1 - math.floor(R * 0.25 + 0.5), a)
+      local x2, y2 = pt(cx, cy, r1, a)
+      if i == 0 then thickLine(x1, y1, x2, y2, col.fg, 3) else thickLine(x1, y1, x2, y2, col.muted, 2) end
+    elseif i % 3 == 0 then
+      local x1, y1 = pt(cx, cy, r1 - math.floor(R * 0.2 + 0.5), a)
+      local x2, y2 = pt(cx, cy, r1, a)
+      thickLine(x1, y1, x2, y2, col.track, 2)
+    elseif fine then
+      local x1, y1 = pt(cx, cy, r1 - math.max(2, math.floor(R * 0.1 + 0.5)), a)
+      local x2, y2 = pt(cx, cy, r1, a)
+      thickLine(x1, y1, x2, y2, col.track, 1)
+    end
+  end
 end
 
 -- Fixed mark at 12 o'clock on the letter track (Nose up), tip towards the ring.
@@ -81,44 +112,38 @@ local function drawNoseMark(cx, cy, tr, col)
   fillTri(cx - w, y - h, cx + w, y - h, cx, y + h, col)
 end
 
--- Ring with ticks and letters turned by rotDeg (Nose up: -course). skipAng: a
--- letter or tick the house (or the nose mark) would touch there is left out.
--- Returns the letter radius.
+-- Ring with face, ticks and letters turned by rotDeg (Nose up: -course).
+-- skipAng: a letter the house (or the nose mark) would touch there is left out.
+-- Compact: the bare band. Returns the letter radius.
 function C.ring(cx, cy, R, rotDeg, skipAng, compact, northUp, col)
   local rw = C.bandWidth(R)
+  local ri = R - math.floor(rw / 2)
+  if not compact and col.face and lcd.drawFilledCircle then lcd.drawFilledCircle(cx, cy, ri, col.face) end
   drawBand(cx, cy, R, rw, col.track)
   local tr = C.letterRadius(R)
   if compact then return tr end
+  if lcd.drawLine then drawTicks(cx, cy, R, ri, rotDeg, col) end
   if not northUp then skipAng = 0; drawNoseMark(cx, cy, tr, col.fg) end
   local minSep = math.deg((textW("W") / 2 + fontH() / 2) / tr)
-  local h = fontH()
   for i, letter in ipairs({ "N", "E", "S", "W" }) do
     local a = (i - 1) * 90 + rotDeg
     if not skipAng or angDiff(a, skipAng) > minSep then
+      local f = (i == 1) and N_FONT or FONT
       local lx, ly = pt(cx, cy, tr, a)
-      text(lx - math.floor(textW(letter) / 2), ly - math.floor(h / 2), letter, (i == 1) and col.fg or col.muted)
-    end
-  end
-  if lcd.drawLine then
-    for i = 0, 3 do
-      local a = 45 + i * 90 + rotDeg
-      if not skipAng or angDiff(a, skipAng) > minSep then
-        local x1, y1 = pt(cx, cy, R - math.floor(rw / 2), a)
-        local x2, y2 = pt(cx, cy, tr - 1, a)
-        thickLine(x1, y1, x2, y2, col.track)
-      end
+      text(lx - math.floor(textW(letter, f) / 2), ly - math.floor(fontH(f) / 2), letter, (i == 1) and col.fg or col.muted, f)
     end
   end
   return tr
 end
 
 -- Notched arrow: tip, wings and tail notch as in the design (radius r = the tip).
-function C.arrow(cx, cy, r, deg, col)
+-- shade: colour of the right half (lit from the left), none = one colour.
+function C.arrow(cx, cy, r, deg, col, shade)
   local tx, ty = pt(cx, cy, r, deg)
   local rx, ry = pt(cx, cy, r * 0.968, deg + 141.7)
   local nx, ny = pt(cx, cy, r * 0.44, deg + 180)
   local lx, ly = pt(cx, cy, r * 0.968, deg - 141.7)
-  fillTri(tx, ty, rx, ry, nx, ny, col)
+  fillTri(tx, ty, rx, ry, nx, ny, shade or col)
   fillTri(tx, ty, nx, ny, lx, ly, col)
 end
 
@@ -166,11 +191,11 @@ function C.draw(cx, cy, R, d, northUp, compact, col)
     C.crosshair(cx, cy, r, C.bandWidth(R), col.fg)
   elseif northUp then
     local tr = C.ring(cx, cy, R, 0, d.bearing, compact, true, col)
-    C.arrow(cx, cy, r, d.course, col.fg)
+    C.arrow(cx, cy, r, d.course, col.fg, col.muted)
     drawHome(cx, cy, R, tr, d.bearing, compact, col)
   else
     C.ring(cx, cy, R, -d.course, nil, compact, false, col)
-    if d.rel then C.arrow(cx, cy, r, d.rel, col.fg) end
+    if d.rel then C.arrow(cx, cy, r, d.rel, col.fg, col.muted) end
   end
 end
 

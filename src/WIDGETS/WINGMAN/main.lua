@@ -44,6 +44,7 @@ local DARK = {
   disk   = lcd.RGB( 22,  25,  22),   -- map background
   trail  = lcd.RGB( 60,  96,  30),   -- flight track, accent at 40 %
   box    = lcd.RGB( 27,  30,  27),
+  face   = lcd.RGB( 27,  30,  27),   -- compass dial
   halo   = lcd.RGB( 70,  26,  26),
   head   = lcd.RGB( 27,  30,  27),   -- wait page mascot
   disc   = lcd.RGB( 45,  74,  23),   -- spinning props, accent at 30 %
@@ -60,6 +61,7 @@ local LIGHT = {
   rgb    = LIGHT_RGB,
   trail  = lcd.RGB(130, 200, 120),
   box    = lcd.RGB(200, 200, 205),
+  face   = lcd.RGB(235, 235, 240),   -- compass dial
   halo   = lcd.RGB(245, 190, 190),
   head   = lcd.RGB(205, 235, 190),   -- wait page mascot, light green
   eyeRing = lcd.RGB( 90,  90,  90),  -- white eyes need an outline on the light head
@@ -982,7 +984,7 @@ local NORTH_UP = false
 local function compassR(L) return math.floor(70 * L.k * 0.8 + 0.5) end   -- design: 200 unit compass drawn at 160 px
 local function drawCompass(L, cx, cy, g, kind, course, rel)
   local R = compassR(L)
-  local col = { track = COLORS.track, fg = COLORS.fg, muted = COLORS.muted }
+  local col = { track = COLORS.track, fg = COLORS.fg, muted = COLORS.muted, face = COLORS.face }
   if kind ~= "arrow" then
     compass.ring(cx, cy, R, NORTH_UP and 0 or -(course or 0), nil, false, NORTH_UP, col)
     if kind == "house" then compass.house(cx, cy, math.floor(R * 0.55), COLORS.fg, COLORS.track) end
