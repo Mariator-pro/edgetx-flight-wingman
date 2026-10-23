@@ -1178,10 +1178,12 @@ local CONFIG_POLL = 500   -- getTime units: 5 s
 M.MASCOTS = { "quad", "scout" }   -- wait page character, first = default
 M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the battery %, first = default
 M.GPS_VIEWS = { "compass", "horizon" }      -- flight page GPS column, first = default
+M.BAR_STYLES = { "solid", "segments", "zones" }   -- battery, link and LQ bars, first = default
 
 function M.defaultConfig()
   return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1],
-           flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1], switchPage = true, modes = {} }
+           flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1], barStyle = M.BAR_STYLES[1],
+           switchPage = true, modes = {} }
 end
 
 -- Returns the config, or nil plus "parse" | "schema" (and a detail text).
@@ -1200,6 +1202,7 @@ function M.loadConfig()
   if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
   if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
   if cfg.gpsView ~= M.GPS_VIEWS[2] then cfg.gpsView = M.GPS_VIEWS[1] end
+  if cfg.barStyle ~= M.BAR_STYLES[2] and cfg.barStyle ~= M.BAR_STYLES[3] then cfg.barStyle = M.BAR_STYLES[1] end
   cfg.switchPage = cfg.switchPage ~= false
   if type(cfg.modes) ~= "table" then cfg.modes = {} end   -- switch page: FC modes by model file
   return cfg
@@ -1254,9 +1257,9 @@ function M.setModules(cfg, filename, on)
   cfg.models[filename] = m
 end
 
--- Switches of the active model, the mascot, the flight time and GPS view choice, re-read every 5 s (a
--- change in the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot, flight time and GPS view. The stored modes keep their
+-- Switches of the active model, the mascot, the flight time, GPS view and bar style choice, re-read
+-- every 5 s (a change in the settings tool or a model switch applies without a reload). A damaged
+-- file: all on, default mascot, flight time, GPS view and bar style. The stored modes keep their
 -- table while unchanged, so the switch page is not built again on every read.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
@@ -1266,6 +1269,7 @@ local function pollModules(w, now)
   w.mascot = cfg and cfg.mascot
   w.flightTime = cfg and cfg.flightTime
   w.gpsView = cfg and cfg.gpsView
+  w.barStyle = cfg and cfg.barStyle
   w.switchPage = not cfg or cfg.switchPage
   local modes = cfg and file and cfg.modes[file] or nil
   if not (sameModes(w.modesEntry, modes) and w.modesEntry.date == modes.date) then w.modesEntry = modes end

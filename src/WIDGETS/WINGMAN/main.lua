@@ -566,7 +566,114 @@ local BASELINE  = 0.76   -- baseline inside a text box, as a share of its report
 -- Capital letters inside a text box (share of its reported height), for centring
 -- a word in a bar; measured on BOLD in the 800 x 480 simulator.
 local CAP_TOP, CAP_H = 0.185, 0.593
-local BAR_TOP, BAR_BOTTOM = 170, 204   -- battery and link bar, 34 px high
+-- Battery and link bar, 34 px high; style from the settings tool: "solid",
+-- "segments" (N blocks, unlit blocks in a threshold zone in its colour mixed into
+-- the track by ZONE_TRACK) or "zones" (thinner bar, a zone strip and a pointer).
+local BAR = { TOP = 170, BOTTOM = 204, N = 20, ZONE_TRACK = 0.8, style = "solid" }
+
+-- Draws the bar in a style other than Solid and returns true; false for Solid,
+-- which the caller draws. inner: side of a vertical bar facing the page (1 right,
+-- -1 left); the other arguments as BAR.drawSegments.
+function BAR.drawStyled(L, x, y, w, h, vertical, inner, pct, solid, col, resCol, marks, high)
+  if BAR.style == "segments" then
+    BAR.drawSegments(x, y, w, h, vertical, L.s(3), pct, solid, col, resCol, marks, high)
+  elseif BAR.style == "zones" then
+    BAR.drawZones(L, x, y, w, h, vertical, inner, pct, solid, col, resCol, marks, high)
+  else
+    return false
+  end
+  return true
+end
+
+-- Zones style: the bar (lightened end from solid % on) and beside it, towards the
+-- page, a strip with each mark's zone in full colour and a pointer at pct.
+function BAR.drawZones(L, x, y, w, h, vertical, inner, pct, solid, col, resCol, marks, high)
+  local st, g, r = math.max(2, L.s(6)), math.max(1, L.s(4)), L.s(4)
+  local len = vertical and h or w
+  local bt = (vertical and w or h) - st - g   -- bar thickness
+  local fl = math.floor(len * math.max(0, math.min(100, pct or 0)) / 100)
+  local sl = math.min(fl, math.floor(len * math.max(0, math.min(100, solid)) / 100))
+  local sx, sy, sw, sh = x, y + bt + g, w, st   -- strip
+  if vertical then
+    local bx = (inner < 0) and x + st + g or x
+    sx, sy, sw, sh = (inner < 0) and x or x + bt + g, y, st, h
+    fillRounded(bx, y, bt, h, r, COLORS.track)
+    for i = (fl > sl) and 1 or 2, 2 do
+      local l, c = (i == 1) and fl or sl, (i == 1) and resCol or col
+      if l >= 2 * r then fillRounded(bx, y + h - l, bt, l, r, c)
+      elseif l > 0 then lcd.drawFilledRectangle(bx + r, y + h - l, bt - 2 * r, l, c) end
+    end
+  else
+    fillRounded(x, y, w, bt, r, COLORS.track)
+    if fl > sl then fillBar(x, y, fl, bt, r, resCol) end
+    if sl > 0 and fillBar(x, y, sl, bt, r, col) and fl > sl then lcd.drawFilledRectangle(x + sl - r, y, r, bt, col) end
+  end
+  -- A mark's zone runs to the next mark (low: from below it to it, high: from it up).
+  local sr = math.floor((st - 1) / 2)   -- strip ends rounded, zones squared where they meet
+  fillRounded(sx, sy, sw, sh, sr, COLORS.track)
+  for _, m in ipairs(marks) do
+    local p = m[1]
+    if p then
+      local a, b = high and p or 0, high and 100 or p
+      for _, o in ipairs(marks) do
+        local q = o[1]
+        if q and high and q > p and q < b then b = q end
+        if q and not high and q < p and q > a then a = q end
+      end
+      local pa, pb, c = math.floor(len * a / 100), math.floor(len * math.min(100, b) / 100), rgb(m[2])
+      if pb - pa < 2 * sr then
+        if vertical then lcd.drawFilledRectangle(sx, sy + h - pb, sw, pb - pa, c)
+        else lcd.drawFilledRectangle(sx + pa, sy, pb - pa, sh, c) end
+      elseif vertical then
+        local zy = sy + h - pb
+        fillRounded(sx, zy, sw, pb - pa, sr, c)
+        if pb < len then lcd.drawFilledRectangle(sx, zy, sw, sr, c) end
+        if pa > 0 then lcd.drawFilledRectangle(sx, zy + pb - pa - sr, sw, sr, c) end
+      else
+        fillRounded(sx + pa, sy, pb - pa, sh, sr, c)
+        if pa > 0 then lcd.drawFilledRectangle(sx + pa, sy, sr, sh, c) end
+        if pb < len then lcd.drawFilledRectangle(sx + pb - sr, sy, sr, sh, c) end
+      end
+    end
+  end
+  if not pct then return end
+  local tri, ps, pd, pg = lcd.drawFilledTriangle or lcd.drawTriangle, math.max(3, L.s(6)), math.max(4, L.s(8)), L.s(2)
+  if vertical then
+    local py, tx = y + h - fl, (inner < 0) and sx - pg or sx + sw + pg
+    local bx = (inner < 0) and tx - pd or tx + pd
+    tri(tx, py, bx, py - ps, bx, py + ps, COLORS.fg)
+  else
+    local px, ty = x + fl, sy + sh + pg
+    tri(px, ty, px - ps, ty + pd, px + ps, ty + pd, COLORS.fg)
+  end
+end
+
+-- Segmented bar over x, y, w, h (vertical: filled from the bottom), gap px between
+-- blocks: lit up to pct in col, from solid % on in resCol (the lightened end; 100: none).
+-- marks { pct, rgb }: an unlit block whose middle is below a mark (above with high)
+-- takes the nearest such mark's zone colour.
+function BAR.drawSegments(x, y, w, h, vertical, gap, pct, solid, col, resCol, marks, high)
+  local len, n = vertical and h or w, BAR.N
+  local step = 100 / n
+  for i = 0, n - 1 do
+    local a = math.floor(i * (len + gap) / n)
+    local b = math.floor((i + 1) * (len + gap) / n) - gap
+    local lo, c = i * step, COLORS.track
+    if (pct or 0) > lo then
+      c = (lo >= solid) and resCol or col
+    else
+      local mid, zone, best = lo + step / 2, nil, nil
+      for _, m in ipairs(marks) do
+        local p = m[1]
+        if p and ((high and mid >= p) or (not high and mid < p))
+           and (not best or (high and p > best) or (not high and p < best)) then zone, best = m[2], p end
+      end
+      if zone then c = mixRGB(zone, COLORS.rgb.track, BAR.ZONE_TRACK) end
+    end
+    if vertical then lcd.drawFilledRectangle(x, y + h - b, w, b - a, c)
+    else lcd.drawFilledRectangle(x + a, y, b - a, h, c) end
+  end
+end
 local FONTS_LRG = { hero = DBLSIZE, unit = MIDSIZE, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
                     value = 0, side = MIDSIZE, title = SMLSIZE, stage = BOLD, ready = DBLSIZE }
 local FONTS_STD = { hero = DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or SMLSIZE,
@@ -862,16 +969,18 @@ local function drawGrid(L, x, w, cells)
   end
 end
 
--- Bar filled to pct with threshold marks { pct, colour }; by (optional) its top in px.
+-- Bar filled to pct with threshold marks { pct, rgb } (below them is worse); by
+-- (optional) its top in px.
 local function drawBar(L, x, w, pct, col, marks, by)
-  local bh, r = L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
-  by = by or L.y(BAR_TOP)
+  local bh, r = L.y(BAR.BOTTOM) - L.y(BAR.TOP), L.s(4)
+  by = by or L.y(BAR.TOP)
+  if BAR.drawStyled(L, x, by, w, bh, false, 1, pct, 100, col, col, marks) then return end
   fillRounded(x, by, w, bh, r, COLORS.track)
   local fw = math.floor(w * math.max(0, math.min(100, pct or 0)) / 100)
   fillBar(x, by, fw, bh, r, col)
   local t = L.s(4)
   for _, m in ipairs(marks) do
-    lcd.drawFilledRectangle(x + math.floor(w * m[1] / 100), by - t, L.s(3), bh + 2 * t, m[2])
+    lcd.drawFilledRectangle(x + math.floor(w * m[1] / 100), by - t, L.s(3), bh + 2 * t, rgb(m[2]))
   end
 end
 
@@ -914,7 +1023,7 @@ local function drawBattery(L, x, w, b, sideLabel, sideValue, sideCol)
   drawHero(L, x, right, fmt("%d", b.pct), "%", col, "REMAINING",
            sideValue and sideLabel, sideValue, sideCol)
   if b.pct then drawStage(L, right, true, stage, STAGE_FIELD_Y) end
-  drawBar(L, x, w, b.pct, col, { { b.warn, WARN_COL }, { b.crit, CRIT_COL } })
+  drawBar(L, x, w, b.pct, col, { { b.warn, WARN_RGB }, { b.crit, CRIT_RGB } })
   drawGrid(L, x, w, {
     { "PACK", fmt("%.1f V", b.volt), hot },
     { "PER CELL", fmt("%.2f V", b.cell), hot },
@@ -952,19 +1061,23 @@ local function drawLink(L, x, w, l, linkUp)
 
   -- Range bar: fills towards the limit. With dynamic TX
   -- power below the maximum the end the bar would lose at full power is lightened.
-  local by, bh, r = L.y(BAR_TOP), L.y(BAR_BOTTOM) - L.y(BAR_TOP), L.s(4)
-  fillRounded(x, by, w, bh, r, COLORS.track)
+  local by, bh, r = L.y(BAR.TOP), L.y(BAR.BOTTOM) - L.y(BAR.TOP), L.s(4)
   local pct = unknown and 100 or math.max(0, math.min(100, l.range or 0))
-  local fw = math.floor(w * pct / 100)
-  local sw = (l.reserve and not unknown) and math.floor(w * math.max(0, pct - l.reserve) / 100) or fw
-  -- lightened end under the solid part, which is squared off where it ends
-  if fw > sw then fillBar(x, by, fw, bh, r, reserveColor(l.stage)) end
-  if sw > 0 then
-    if fillBar(x, by, sw, bh, r, col) and fw > sw then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
-  end
-  if l.warn and not unknown then   -- stage 1 mark as on the battery bar
-    local t = L.s(4)
-    lcd.drawFilledRectangle(x + math.floor(w * l.warn / 100), by - t, L.s(3), bh + 2 * t, WARN_COL)
+  local solid = (l.reserve and not unknown) and math.max(0, pct - l.reserve) or pct
+  -- zone above the stage 1 limit
+  if not BAR.drawStyled(L, x, by, w, bh, false, 1, pct, solid, col, reserveColor(l.stage),
+                        { { not unknown and l.warn, WARN_RGB } }, true) then
+    fillRounded(x, by, w, bh, r, COLORS.track)
+    local fw, sw = math.floor(w * pct / 100), math.floor(w * solid / 100)
+    -- lightened end under the solid part, which is squared off where it ends
+    if fw > sw then fillBar(x, by, fw, bh, r, reserveColor(l.stage)) end
+    if sw > 0 then
+      if fillBar(x, by, sw, bh, r, col) and fw > sw then lcd.drawFilledRectangle(x + sw - r, by, r, bh, col) end
+    end
+    if l.warn and not unknown then   -- stage 1 mark as on the battery bar
+      local t = L.s(4)
+      lcd.drawFilledRectangle(x + math.floor(w * l.warn / 100), by - t, L.s(3), bh + 2 * t, WARN_COL)
+    end
   end
   drawStage(L, right, true, l.stage, STAGE_FIELD_Y)
 
@@ -1299,10 +1412,13 @@ function HZ.battery(L, z, b, sideCap, sideValue, sideCol)
   local stage = b.level or 0
   local col = levelCol(stage)
   drawTitle(L, x, packTitle(L, L.x(HZ.X0) - x, b.name, b.nameShort))
-  fillRounded(x, top, bw, bottom - top, r, COLORS.track)
-  HZ.vfill(x, bottom, bw, math.floor((bottom - top) * math.max(0, math.min(100, b.pct or 0)) / 100), r, col)
-  for _, m in ipairs({ { b.warn, WARN_COL }, { b.crit, CRIT_COL } }) do
-    lcd.drawFilledRectangle(x - L.s(4), bottom - math.floor((bottom - top) * m[1] / 100) - 1, bw + L.s(8), L.s(3), m[2])
+  if not BAR.drawStyled(L, x, top, bw, bottom - top, true, 1, b.pct, 100, col, col,
+                        { { b.warn, WARN_RGB }, { b.crit, CRIT_RGB } }) then
+    fillRounded(x, top, bw, bottom - top, r, COLORS.track)
+    HZ.vfill(x, bottom, bw, math.floor((bottom - top) * math.max(0, math.min(100, b.pct or 0)) / 100), r, col)
+    for _, m in ipairs({ { b.warn, WARN_COL }, { b.crit, CRIT_COL } }) do
+      lcd.drawFilledRectangle(x - L.s(4), bottom - math.floor((bottom - top) * m[1] / 100) - 1, bw + L.s(8), L.s(3), m[2])
+    end
   end
   local tx = x + bw + L.s(14)
   HZ.hero(L, tx, false, fmt("%d", b.pct), "%", col, "REMAINING")
@@ -1331,14 +1447,17 @@ function HZ.link(L, z, l, linkUp)
   if linkUp then drawHeartbeat(right - HEARTBEAT_R, L.y(21) + math.floor(s / 2)) end
   local unknown = l.sensLimit == 0
   local h = bottom - top
-  fillRounded(x, top, bw, h, r, COLORS.track)
   local pct = unknown and 100 or math.max(0, math.min(100, l.range or 0))
-  local fh = math.floor(h * pct / 100)
-  local sh = (l.reserve and not unknown) and math.floor(h * math.max(0, pct - l.reserve) / 100) or fh
-  if fh > sh then HZ.vfill(x, bottom, bw, fh, r, reserveColor(l.stage)) end
-  HZ.vfill(x, bottom, bw, sh, r, col)
-  if l.warn and not unknown then
-    lcd.drawFilledRectangle(x - L.s(4), bottom - math.floor(h * l.warn / 100) - 1, bw + L.s(8), L.s(3), WARN_COL)
+  local solid = (l.reserve and not unknown) and math.max(0, pct - l.reserve) or pct
+  if not BAR.drawStyled(L, x, top, bw, h, true, -1, pct, solid, col, reserveColor(l.stage),
+                        { { not unknown and l.warn, WARN_RGB } }, true) then
+    fillRounded(x, top, bw, h, r, COLORS.track)
+    local fh, sh = math.floor(h * pct / 100), math.floor(h * solid / 100)
+    if fh > sh then HZ.vfill(x, bottom, bw, fh, r, reserveColor(l.stage)) end
+    HZ.vfill(x, bottom, bw, sh, r, col)
+    if l.warn and not unknown then
+      lcd.drawFilledRectangle(x - L.s(4), bottom - math.floor(h * l.warn / 100) - 1, bw + L.s(8), L.s(3), WARN_COL)
+    end
   end
   local inner = x - L.s(14)
   local modeCap, modeVal = modeParts(l.mode)
@@ -1536,299 +1655,302 @@ end
 -- with a status line at the bottom; below a strip with the ready field (GO /
 -- CHECK), the line next to it and the versions. Statuses come from the core.
 -- ---------------------------------------------------------------------------
-local PRE_COLS_H = 300
-local STATUS_Y   = 282   -- status line baseline (design y)
-local PACK_TOP, PACK_ROW_H = 50, 36
-local READY_W, READY_H = 190, 76
-local CONFIRM_FILL_OPACITY = 8   -- confirm hold bar behind the selected pack
+local KEPT, secsLeft, countdownW, drawCountdown, drawPre
+do
+  local PRE_COLS_H = 300
+  local STATUS_Y   = 282   -- status line baseline (design y)
+  local PACK_TOP, PACK_ROW_H = 50, 36
+  local READY_W, READY_H = 190, 76
+  local CONFIRM_FILL_OPACITY = 8   -- confirm hold bar behind the selected pack
 
--- Dot plus status text in its level colour.
-local function drawStatus(L, x, st)
-  if not st then return end
-  local col, font = levelCol(st.level), L.f.value
-  local fh, d = fontH(font), L.s(10)
-  local base = L.y(STATUS_Y)
-  local cy = base - math.floor(fh * (BASELINE - CAP_TOP - CAP_H / 2) + 0.5)
-  lcd.drawFilledCircle(x + math.floor(d / 2), cy, math.floor(d / 2), col)
-  btext(x + d + L.s(8), base, st.text, col, font)
-end
-
--- Bar and cells spread with equal gaps between the big value's caption and the
--- status line: bar top, cell label baseline and label-to-value pitch in px.
-local function preRows(L)
-  local top = L.y(HERO_Y + 29)
-  local bottom = L.y(STATUS_Y) - math.floor(fontH(L.f.value) * (BASELINE - CAP_TOP) + 0.5)
-  local bh = L.y(BAR_BOTTOM) - L.y(BAR_TOP)
-  local capH = math.floor(fontH(L.f.label) * CAP_H + 0.5)
-  local pitch = L.y(36) - L.y(10)   -- label to value baseline, as drawCell
-  local gap = math.floor((bottom - top - bh - capH - pitch) / 3)
-  return top + gap, top + 2 * gap + bh + capH, pitch
-end
-
--- Two cells { label, value, col, draw } (as drawCell) on the preflight cell row.
-local function drawPreCells(L, x, w, cells)
-  local _, base, pitch = preRows(L)
-  for i, c in ipairs(cells) do
-    local cx = x + (i - 1) * math.floor(w / 2)
-    btext(cx, base, c[1], COLORS.muted, L.f.label)
-    if c[4] then c[4](L, cx, base + pitch, c[2]) else btext(cx, base + pitch, c[2], c[3] or COLORS.fg, L.f.value) end
+  -- Dot plus status text in its level colour.
+  local function drawStatus(L, x, st)
+    if not st then return end
+    local col, font = levelCol(st.level), L.f.value
+    local fh, d = fontH(font), L.s(10)
+    local base = L.y(STATUS_Y)
+    local cy = base - math.floor(fh * (BASELINE - CAP_TOP - CAP_H / 2) + 0.5)
+    lcd.drawFilledCircle(x + math.floor(d / 2), cy, math.floor(d / 2), col)
+    btext(x + d + L.s(8), base, st.text, col, font)
   end
-end
 
-local function drawPreBattery(L, x, w, b, st)
-  local col = levelCol(st.batt.level)
-  drawTitle(L, x, packTitle(L, w, b.name, b.nameShort))
-  local small = smallCol(b.level)
-  -- PER CELL and PACK by the cell voltage as on the flight page; bar, cells and status by the rest
-  drawHero(L, x, x + w, fmt("%.2f", b.cell), "V", levelCol(b.vLevel), "PER CELL", "PACK", fmt("%.1f V", b.volt), smallCol(b.vLevel))
-  drawBar(L, x, w, b.pct, col, { { b.warn, WARN_COL }, { b.crit, CRIT_COL } }, preRows(L))
-  drawPreCells(L, x, w, { { "REMAINING", fmt("%d %%", b.pct), small }, { "LEFT", fmtMah(b.left), small } })
-  drawStatus(L, x, st.batt)
-end
-
--- Marquee as in LiPo Nanny's selection popup: a name too long for its row
--- scrolls by one character per MARQUEE_STEP, pausing MARQUEE_PAUSE steps at the
--- start and the end. Whole characters, because a widget can't clip text.
-local MARQUEE_STEP  = 30   -- 0.3 s (getTime units)
-local MARQUEE_PAUSE = 3
-
--- True for a UTF-8 continuation byte (never the start of a character).
-local function isContByte(s, i)
-  local b = string.byte(s, i)
-  return b ~= nil and b >= 128 and b < 192
-end
-
--- Longest part of s from byte first on that fits maxW, never ending inside a
--- multi-byte character. Binary search: ~log2(#s) measurements.
-local function fitFrom(s, first, maxW, font)
-  local lo, hi = first - 1, #s
-  if textW(string.sub(s, first), font) <= maxW then return string.sub(s, first) end
-  while hi - lo > 1 do
-    local mid = math.floor((lo + hi) / 2)
-    if textW(string.sub(s, first, mid), font) <= maxW then lo = mid else hi = mid end
+  -- Bar and cells spread with equal gaps between the big value's caption and the
+  -- status line: bar top, cell label baseline and label-to-value pitch in px.
+  local function preRows(L)
+    local top = L.y(HERO_Y + 29)
+    local bottom = L.y(STATUS_Y) - math.floor(fontH(L.f.value) * (BASELINE - CAP_TOP) + 0.5)
+    local bh = L.y(BAR.BOTTOM) - L.y(BAR.TOP)
+    local capH = math.floor(fontH(L.f.label) * CAP_H + 0.5)
+    local pitch = L.y(36) - L.y(10)   -- label to value baseline, as drawCell
+    local gap = math.floor((bottom - top - bh - capH - pitch) / 3)
+    return top + gap, top + 2 * gap + bh + capH, pitch
   end
-  while lo >= first and isContByte(s, lo + 1) do lo = lo - 1 end
-  return string.sub(s, first, lo)
-end
 
--- Scroll steps until the end of name fits maxW (0: the whole name fits), one
--- per byte: a multi-byte character just holds its place one step longer.
-local function marqueeSteps(name, maxW, font)
-  if textW(name, font) <= maxW then return 0 end
-  local lo, hi = 1, #name
-  while lo < hi do
-    local mid = math.floor((lo + hi) / 2)
-    if textW(string.sub(name, mid), font) <= maxW then hi = mid else lo = mid + 1 end
-  end
-  return lo - 1
-end
-
--- First byte shown at time t: one step per MARQUEE_STEP, MARQUEE_PAUSE steps
--- at the start and the end, never inside a multi-byte character.
-local function marqueeFirst(name, t, steps)
-  local pos = math.floor(t / MARQUEE_STEP) % (steps + 2 * MARQUEE_PAUSE) - MARQUEE_PAUSE
-  local first = math.max(0, math.min(steps, pos)) + 1
-  while isContByte(name, first) do first = first + 1 end
-  return first
-end
-
--- The part of name to show at time t (getTime units since the row got the cursor).
-local function marqueeText(name, maxW, t, font)
-  local steps = marqueeSteps(name, maxW, font)
-  if steps == 0 then return name end
-  return fitFrom(name, marqueeFirst(name, t, steps), maxW, font)
-end
-
--- KEPT.marquee and KEPT.cut: as marqueeText and cutText, but each text measured
--- once per width and font (the switch page draws many texts every frame); the
--- memo starts over at KEPT.max texts. Measuring is spread over frames: at most
--- KEPT.left new measurements per frame (set by the caller), the next marquee
--- step measured ahead; past that nil (KEPT.missed) or the last marquee step.
-local KEPT = { memo = {}, n = 0, max = 400, left = 0 }
--- A new memo slot for key when this frame may still measure, else nil.
-local function keptSlot(key)
-  if KEPT.left <= 0 then KEPT.missed = true; return false end
-  if KEPT.n >= KEPT.max then KEPT.memo, KEPT.n = {}, 0 end
-  KEPT.n, KEPT.left = KEPT.n + 1, KEPT.left - 1
-  return true
-end
-function KEPT.marquee(name, maxW, t, font, key)   -- key: as built here, when the caller keeps it
-  key = key or (font .. "|" .. maxW .. "|" .. name)
-  local m = KEPT.memo[key]
-  if not m then
-    if not keptSlot(key) then return nil end
-    m = { steps = marqueeSteps(name, maxW, font) }
-    KEPT.memo[key] = m
-  end
-  if m.steps == 0 then return name end
-  local step = math.floor(t / MARQUEE_STEP)
-  if m.at == step then return m.last end
-  local first = marqueeFirst(name, t, m.steps)
-  local part = m[first]
-  if not part then
-    if KEPT.left <= 0 then KEPT.missed = KEPT.missed or not m.last; return m.last end
-    part, KEPT.left = fitFrom(name, first, maxW, font), KEPT.left - 1
-    m[first] = part
-  end
-  m.last, m.at = part, step
-  if m.ahead ~= first and KEPT.left > 0 then   -- once per step: the next one
-    local nxt = marqueeFirst(name, t + MARQUEE_STEP, m.steps)
-    if not m[nxt] then m[nxt], KEPT.left = fitFrom(name, nxt, maxW, font), KEPT.left - 1 end
-    m.ahead = first
-  end
-  return part
-end
-function KEPT.cut(text, maxW, font)
-  local key = "cut|" .. font .. "|" .. maxW .. "|" .. text
-  local c = KEPT.memo[key]
-  if not c then
-    if not keptSlot(key) then return nil end
-    c = cutText(text, "", maxW, font)
-    KEPT.memo[key] = c
-  end
-  return c
-end
-
--- Pack selection inside the battery column: window around the cursor, confirm
--- hold as a bar behind the selected row, the stick hint at the bottom. A
--- triangle above and below the list while the cursor can move that way (the
--- elevator gesture): accent while the elevator leans that way, nudging until
--- the step counts. The selected name scrolls (restarting when the cursor
--- moves), the others are cut.
-local function drawPackList(L, x, w, b, ctx)
-  drawTitle(L, x, "SELECT PACK")
-  local font = L.f.value
-  local rowH = L.y(PACK_TOP + PACK_ROW_H) - L.y(PACK_TOP)
-  local maxRows = math.floor((STATUS_Y - 24 - PACK_TOP) / PACK_ROW_H)
-  local cursor = b.cursor or 1
-  if ctx.marqueeRow ~= cursor then ctx.marqueeRow, ctx.marqueeSince = cursor, getTime() end
-  local start = math.max(1, math.min(cursor - math.floor((maxRows - 1) / 2), #b.packs - maxRows + 1))
-  for i = start, math.min(#b.packs, start + maxRows - 1) do
-    local pk, y = b.packs[i], L.y(PACK_TOP + (i - start) * PACK_ROW_H)
-    local sel = i == cursor
-    if sel and (b.hold or 0) > 0 then
-      lcd.drawFilledRectangle(x, y, math.floor(w * math.min(1, b.hold)), rowH - 2, COLORS.accent, CONFIRM_FILL_OPACITY)
+  -- Two cells { label, value, col, draw } (as drawCell) on the preflight cell row.
+  local function drawPreCells(L, x, w, cells)
+    local _, base, pitch = preRows(L)
+    for i, c in ipairs(cells) do
+      local cx = x + (i - 1) * math.floor(w / 2)
+      btext(cx, base, c[1], COLORS.muted, L.f.label)
+      if c[4] then c[4](L, cx, base + pitch, c[2]) else btext(cx, base + pitch, c[2], c[3] or COLORS.fg, L.f.value) end
     end
-    local prefix = sel and "> " or "  "
-    local suffix = string.format(" #%d (%dc)", pk.pos, pk.cycles)
-    local nameW = w - textW(prefix .. suffix, font)
-    local text = sel and marqueeText(pk.name, nameW, getTime() - ctx.marqueeSince, font)
-                 or cutText(pk.name, "", nameW, font)
-    -- the number sits fixed at the right edge, so it never jumps with the scrolling name
-    local ty, col = y + math.floor((rowH - fontH(font)) / 2), sel and COLORS.accent or COLORS.fg
-    dtext(x, ty, prefix .. text, col, font)
-    dtext(x + w - textW(suffix, font), ty, suffix, col, font)
   end
-  local tw, th, cx = L.s(12), L.s(7), x + math.floor(w / 2)
-  local rows = math.min(#b.packs, maxRows)
-  for dir = -1, 1, 2 do   -- -1 up, 1 down
-    if dir < 0 and cursor > 1 or dir > 0 and cursor < #b.packs then
-      local lean = -dir * (b.ele or 0) > 0.05   -- elevator up (positive) moves the cursor up
-      local top = L.y(PACK_TOP) - L.s(3) - th
-      -- Up: never further than to the title's baseline (small screens have 1 or 2 px).
-      local amp = dir < 0 and math.min(L.s(3), math.max(0, top - L.y(31) - 1)) or L.s(3)
-      local d = (lean and b.eleArmed) and dir * nudge(amp) or 0
-      local col = lean and COLORS.accent or COLORS.muted
-      if dir < 0 then
-        local ty = top + d
-        fillTri(cx - math.floor(tw / 2), ty + th, cx + math.floor(tw / 2), ty + th, cx, ty, col)
-      else
-        local ty = L.y(PACK_TOP + rows * PACK_ROW_H) + L.s(2) + d
-        fillTri(cx - math.floor(tw / 2), ty, cx + math.floor(tw / 2), ty, cx, ty + th, col)
+
+  local function drawPreBattery(L, x, w, b, st)
+    local col = levelCol(st.batt.level)
+    drawTitle(L, x, packTitle(L, w, b.name, b.nameShort))
+    local small = smallCol(b.level)
+    -- PER CELL and PACK by the cell voltage as on the flight page; bar, cells and status by the rest
+    drawHero(L, x, x + w, fmt("%.2f", b.cell), "V", levelCol(b.vLevel), "PER CELL", "PACK", fmt("%.1f V", b.volt), smallCol(b.vLevel))
+    drawBar(L, x, w, b.pct, col, { { b.warn, WARN_RGB }, { b.crit, CRIT_RGB } }, preRows(L))
+    drawPreCells(L, x, w, { { "REMAINING", fmt("%d %%", b.pct), small }, { "LEFT", fmtMah(b.left), small } })
+    drawStatus(L, x, st.batt)
+  end
+
+  -- Marquee as in LiPo Nanny's selection popup: a name too long for its row
+  -- scrolls by one character per MARQUEE_STEP, pausing MARQUEE_PAUSE steps at the
+  -- start and the end. Whole characters, because a widget can't clip text.
+  local MARQUEE_STEP  = 30   -- 0.3 s (getTime units)
+  local MARQUEE_PAUSE = 3
+
+  -- True for a UTF-8 continuation byte (never the start of a character).
+  local function isContByte(s, i)
+    local b = string.byte(s, i)
+    return b ~= nil and b >= 128 and b < 192
+  end
+
+  -- Longest part of s from byte first on that fits maxW, never ending inside a
+  -- multi-byte character. Binary search: ~log2(#s) measurements.
+  local function fitFrom(s, first, maxW, font)
+    local lo, hi = first - 1, #s
+    if textW(string.sub(s, first), font) <= maxW then return string.sub(s, first) end
+    while hi - lo > 1 do
+      local mid = math.floor((lo + hi) / 2)
+      if textW(string.sub(s, first, mid), font) <= maxW then lo = mid else hi = mid end
+    end
+    while lo >= first and isContByte(s, lo + 1) do lo = lo - 1 end
+    return string.sub(s, first, lo)
+  end
+
+  -- Scroll steps until the end of name fits maxW (0: the whole name fits), one
+  -- per byte: a multi-byte character just holds its place one step longer.
+  local function marqueeSteps(name, maxW, font)
+    if textW(name, font) <= maxW then return 0 end
+    local lo, hi = 1, #name
+    while lo < hi do
+      local mid = math.floor((lo + hi) / 2)
+      if textW(string.sub(name, mid), font) <= maxW then hi = mid else lo = mid + 1 end
+    end
+    return lo - 1
+  end
+
+  -- First byte shown at time t: one step per MARQUEE_STEP, MARQUEE_PAUSE steps
+  -- at the start and the end, never inside a multi-byte character.
+  local function marqueeFirst(name, t, steps)
+    local pos = math.floor(t / MARQUEE_STEP) % (steps + 2 * MARQUEE_PAUSE) - MARQUEE_PAUSE
+    local first = math.max(0, math.min(steps, pos)) + 1
+    while isContByte(name, first) do first = first + 1 end
+    return first
+  end
+
+  -- The part of name to show at time t (getTime units since the row got the cursor).
+  local function marqueeText(name, maxW, t, font)
+    local steps = marqueeSteps(name, maxW, font)
+    if steps == 0 then return name end
+    return fitFrom(name, marqueeFirst(name, t, steps), maxW, font)
+  end
+
+  -- KEPT.marquee and KEPT.cut: as marqueeText and cutText, but each text measured
+  -- once per width and font (the switch page draws many texts every frame); the
+  -- memo starts over at KEPT.max texts. Measuring is spread over frames: at most
+  -- KEPT.left new measurements per frame (set by the caller), the next marquee
+  -- step measured ahead; past that nil (KEPT.missed) or the last marquee step.
+  KEPT = { memo = {}, n = 0, max = 400, left = 0 }
+  -- A new memo slot for key when this frame may still measure, else nil.
+  local function keptSlot(key)
+    if KEPT.left <= 0 then KEPT.missed = true; return false end
+    if KEPT.n >= KEPT.max then KEPT.memo, KEPT.n = {}, 0 end
+    KEPT.n, KEPT.left = KEPT.n + 1, KEPT.left - 1
+    return true
+  end
+  function KEPT.marquee(name, maxW, t, font, key)   -- key: as built here, when the caller keeps it
+    key = key or (font .. "|" .. maxW .. "|" .. name)
+    local m = KEPT.memo[key]
+    if not m then
+      if not keptSlot(key) then return nil end
+      m = { steps = marqueeSteps(name, maxW, font) }
+      KEPT.memo[key] = m
+    end
+    if m.steps == 0 then return name end
+    local step = math.floor(t / MARQUEE_STEP)
+    if m.at == step then return m.last end
+    local first = marqueeFirst(name, t, m.steps)
+    local part = m[first]
+    if not part then
+      if KEPT.left <= 0 then KEPT.missed = KEPT.missed or not m.last; return m.last end
+      part, KEPT.left = fitFrom(name, first, maxW, font), KEPT.left - 1
+      m[first] = part
+    end
+    m.last, m.at = part, step
+    if m.ahead ~= first and KEPT.left > 0 then   -- once per step: the next one
+      local nxt = marqueeFirst(name, t + MARQUEE_STEP, m.steps)
+      if not m[nxt] then m[nxt], KEPT.left = fitFrom(name, nxt, maxW, font), KEPT.left - 1 end
+      m.ahead = first
+    end
+    return part
+  end
+  function KEPT.cut(text, maxW, font)
+    local key = "cut|" .. font .. "|" .. maxW .. "|" .. text
+    local c = KEPT.memo[key]
+    if not c then
+      if not keptSlot(key) then return nil end
+      c = cutText(text, "", maxW, font)
+      KEPT.memo[key] = c
+    end
+    return c
+  end
+
+  -- Pack selection inside the battery column: window around the cursor, confirm
+  -- hold as a bar behind the selected row, the stick hint at the bottom. A
+  -- triangle above and below the list while the cursor can move that way (the
+  -- elevator gesture): accent while the elevator leans that way, nudging until
+  -- the step counts. The selected name scrolls (restarting when the cursor
+  -- moves), the others are cut.
+  local function drawPackList(L, x, w, b, ctx)
+    drawTitle(L, x, "SELECT PACK")
+    local font = L.f.value
+    local rowH = L.y(PACK_TOP + PACK_ROW_H) - L.y(PACK_TOP)
+    local maxRows = math.floor((STATUS_Y - 24 - PACK_TOP) / PACK_ROW_H)
+    local cursor = b.cursor or 1
+    if ctx.marqueeRow ~= cursor then ctx.marqueeRow, ctx.marqueeSince = cursor, getTime() end
+    local start = math.max(1, math.min(cursor - math.floor((maxRows - 1) / 2), #b.packs - maxRows + 1))
+    for i = start, math.min(#b.packs, start + maxRows - 1) do
+      local pk, y = b.packs[i], L.y(PACK_TOP + (i - start) * PACK_ROW_H)
+      local sel = i == cursor
+      if sel and (b.hold or 0) > 0 then
+        lcd.drawFilledRectangle(x, y, math.floor(w * math.min(1, b.hold)), rowH - 2, COLORS.accent, CONFIRM_FILL_OPACITY)
+      end
+      local prefix = sel and "> " or "  "
+      local suffix = string.format(" #%d (%dc)", pk.pos, pk.cycles)
+      local nameW = w - textW(prefix .. suffix, font)
+      local text = sel and marqueeText(pk.name, nameW, getTime() - ctx.marqueeSince, font)
+                   or cutText(pk.name, "", nameW, font)
+      -- the number sits fixed at the right edge, so it never jumps with the scrolling name
+      local ty, col = y + math.floor((rowH - fontH(font)) / 2), sel and COLORS.accent or COLORS.fg
+      dtext(x, ty, prefix .. text, col, font)
+      dtext(x + w - textW(suffix, font), ty, suffix, col, font)
+    end
+    local tw, th, cx = L.s(12), L.s(7), x + math.floor(w / 2)
+    local rows = math.min(#b.packs, maxRows)
+    for dir = -1, 1, 2 do   -- -1 up, 1 down
+      if dir < 0 and cursor > 1 or dir > 0 and cursor < #b.packs then
+        local lean = -dir * (b.ele or 0) > 0.05   -- elevator up (positive) moves the cursor up
+        local top = L.y(PACK_TOP) - L.s(3) - th
+        -- Up: never further than to the title's baseline (small screens have 1 or 2 px).
+        local amp = dir < 0 and math.min(L.s(3), math.max(0, top - L.y(31) - 1)) or L.s(3)
+        local d = (lean and b.eleArmed) and dir * nudge(amp) or 0
+        local col = lean and COLORS.accent or COLORS.muted
+        if dir < 0 then
+          local ty = top + d
+          fillTri(cx - math.floor(tw / 2), ty + th, cx + math.floor(tw / 2), ty + th, cx, ty, col)
+        else
+          local ty = L.y(PACK_TOP + rows * PACK_ROW_H) + L.s(2) + d
+          fillTri(cx - math.floor(tw / 2), ty, cx + math.floor(tw / 2), ty, cx, ty + th, col)
+        end
       end
     end
+    -- Gesture hint on the status line: elevator moves the cursor (the knob shows
+    -- it), aileron held right selects.
+    local fh = fontH(L.f.cap)
+    drawStickHint(ctx.zone, { right = "Select", hold = b.hold, stick = b.stick, ele = b.ele, armed = b.armed, x = x,
+                              cy = L.y(STATUS_Y) - math.floor(fh * BASELINE + 0.5) + math.floor(fh / 2) })
   end
-  -- Gesture hint on the status line: elevator moves the cursor (the knob shows
-  -- it), aileron held right selects.
-  local fh = fontH(L.f.cap)
-  drawStickHint(ctx.zone, { right = "Select", hold = b.hold, stick = b.stick, ele = b.ele, armed = b.armed, x = x,
-                            cy = L.y(STATUS_Y) - math.floor(fh * BASELINE + 0.5) + math.floor(fh / 2) })
-end
 
-local function drawPreGps(L, x, w, g, st)
-  drawTitle(L, x, "GPS")
-  drawSats(L, x, x + w, g)
-  drawPreCells(L, x, w, { { g.dopKind or "PDOP", g.dop and string.format("%.1f", g.dop) or "--",
-                            g.dop and smallCol(st.dopStage) }, { "FIX", g.fix or "--", smallCol(g.fixLevel) } })
-  drawStatus(L, x, st.gps)
-end
-
-local function drawPreLink(L, x, w, l, st, linkUp)
-  local right = x + w
-  drawTitle(L, x, l.modLine)
-  if linkUp then drawHeartbeat(right - HEARTBEAT_R, L.y(21) + math.floor(L.s(11) / 2)) end
-  local modeCap, modeVal = modeParts(l.mode)
-  local col = st.lqLevel and levelCol(st.lqLevel) or COLORS.fg
-  drawHero(L, x, right, fmt("%d", l.lq), "%", col, "LQ", modeCap, modeVal)
-  -- red mark at the link core's stage 2 LQ limit
-  drawBar(L, x, w, l.lq, col, l.lqCrit and { { l.lqCrit, CRIT_COL } } or {}, preRows(L))
-  drawPreCells(L, x, w, { { "RSSI dBm", l, nil, drawRssi }, { txLabel(l), fmt("%d mW", l.tpwr) } })
-  drawStatus(L, x, st.link)
-end
-
--- Seconds left on a page timer that started at `since` (the core's ms clock,
--- getTime() * 10) and runs `total` ms.
-local function secsLeft(since, total)
-  return math.max(0, math.ceil((total - (getTime() * 10 - since)) / 1000))
-end
-
--- Countdown at the bottom right (preflight and post-flight page): text left of
--- a bar that runs empty. countdownW is the width it takes.
-local function countdownW(L, label)
-  return L.x(CD_BAR_W) + L.s(12) + textW(label .. " in 00 s", SMLSIZE)
-end
-local function drawCountdown(z, secs, total, label)
-  drawCornerBar(z, string.format("%s in %d s", label, secs), secs / total, COLORS.muted)
-end
-
--- Ready field left; right of it the versions on top and below the line
--- (arming blocked in yellow), both to the right edge. While the countdown runs
--- (GO, "All modules ready") the line stops short of it.
-local function drawReady(L, z, top, p, st, counting)
-  local bw, bh = L.x(READY_W), L.s(READY_H)
-  local bx, by = L.x(18), top + math.floor((z.h - top - bh) / 2)
-  fillRounded(bx, by, bw, bh, L.s(10), (st.ready == "GO") and COLORS.accent or WARN_COL)
-  local f = L.f.ready
-  local fh = fontH(f)
-  dtext(bx + math.floor(bw / 2), by + math.floor((bh - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5), st.ready,
-        DARK_TEXT, f + CENTER)
-  local tx = bx + bw + L.x(18)
-  local tw = z.w - tx - L.x(18)
-  local ver = getVersion and getVersion()
-  local parts = {}
-  if p.fcInfo then parts[#parts + 1] = p.fcInfo end
-  if ver then parts[#parts + 1] = "EdgeTX " .. ver end
-  btext(tx, by + math.floor(bh * 0.4), cutText(table.concat(parts, ", "), "", tw, L.f.cap), COLORS.muted, L.f.cap)
-  if st.line then
-    if counting then tw = tw - countdownW(L, "Flight page") - L.x(18) end
-    btext(tx, by + bh - L.s(8), cutText(st.line, "", tw, L.f.value),
-          p.armBlocked and WARN_COL or COLORS.fg, L.f.value)
+  local function drawPreGps(L, x, w, g, st)
+    drawTitle(L, x, "GPS")
+    drawSats(L, x, x + w, g)
+    drawPreCells(L, x, w, { { g.dopKind or "PDOP", g.dop and string.format("%.1f", g.dop) or "--",
+                              g.dop and smallCol(st.dopStage) }, { "FIX", g.fix or "--", smallCol(g.fixLevel) } })
+    drawStatus(L, x, st.gps)
   end
-end
 
-local function drawPre(ctx)
-  local w = ctx.w
-  local p, st = w and w.pre, w and w.preStatus
-  if not (p and st) then return end
-  local z = ctx.zone
-  if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
-  local L = flightLayout(z)
-  local top = L.y(PRE_COLS_H)
-  local c = columns(L, z, w.on, top)
-  lcd.drawFilledRectangle(0, top, z.w, 1, COLORS.track)
-  if p.batt and p.batt.packs and c[1] then
-    drawPackList(L, c[1], c[2], p.batt, ctx)
-  else
-    ctx.marqueeRow = nil   -- next selection starts its marquee anew
-    if p.batt and c[1] then drawPreBattery(L, c[1], c[2], p.batt, st) end
+  local function drawPreLink(L, x, w, l, st, linkUp)
+    local right = x + w
+    drawTitle(L, x, l.modLine)
+    if linkUp then drawHeartbeat(right - HEARTBEAT_R, L.y(21) + math.floor(L.s(11) / 2)) end
+    local modeCap, modeVal = modeParts(l.mode)
+    local col = st.lqLevel and levelCol(st.lqLevel) or COLORS.fg
+    drawHero(L, x, right, fmt("%d", l.lq), "%", col, "LQ", modeCap, modeVal)
+    -- red mark at the link core's stage 2 LQ limit
+    drawBar(L, x, w, l.lq, col, l.lqCrit and { { l.lqCrit, CRIT_RGB } } or {}, preRows(L))
+    drawPreCells(L, x, w, { { "RSSI dBm", l, nil, drawRssi }, { txLabel(l), fmt("%d mW", l.tpwr) } })
+    drawStatus(L, x, st.link)
   end
-  if p.gps and c[3] then drawPreGps(L, c[3], c[4], p.gps, st) end
-  if p.link and c[5] then drawPreLink(L, c[5], c[6], p.link, st, w.linkUp) end
-  local fs = w.fs
-  local counting = fs and fs.readySince and w.phase == core.PRE
-  drawReady(L, z, top, p, st, counting)
-  if counting then   -- GO: countdown to the flight page
-    drawCountdown(z, secsLeft(fs.readySince, core.PRE_HOLD_T), core.PRE_HOLD_T / 1000, "Flight page")
+
+  -- Seconds left on a page timer that started at `since` (the core's ms clock,
+  -- getTime() * 10) and runs `total` ms.
+  function secsLeft(since, total)
+    return math.max(0, math.ceil((total - (getTime() * 10 - since)) / 1000))
+  end
+
+  -- Countdown at the bottom right (preflight and post-flight page): text left of
+  -- a bar that runs empty. countdownW is the width it takes.
+  function countdownW(L, label)
+    return L.x(CD_BAR_W) + L.s(12) + textW(label .. " in 00 s", SMLSIZE)
+  end
+  function drawCountdown(z, secs, total, label)
+    drawCornerBar(z, string.format("%s in %d s", label, secs), secs / total, COLORS.muted)
+  end
+
+  -- Ready field left; right of it the versions on top and below the line
+  -- (arming blocked in yellow), both to the right edge. While the countdown runs
+  -- (GO, "All modules ready") the line stops short of it.
+  local function drawReady(L, z, top, p, st, counting)
+    local bw, bh = L.x(READY_W), L.s(READY_H)
+    local bx, by = L.x(18), top + math.floor((z.h - top - bh) / 2)
+    fillRounded(bx, by, bw, bh, L.s(10), (st.ready == "GO") and COLORS.accent or WARN_COL)
+    local f = L.f.ready
+    local fh = fontH(f)
+    dtext(bx + math.floor(bw / 2), by + math.floor((bh - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5), st.ready,
+          DARK_TEXT, f + CENTER)
+    local tx = bx + bw + L.x(18)
+    local tw = z.w - tx - L.x(18)
+    local ver = getVersion and getVersion()
+    local parts = {}
+    if p.fcInfo then parts[#parts + 1] = p.fcInfo end
+    if ver then parts[#parts + 1] = "EdgeTX " .. ver end
+    btext(tx, by + math.floor(bh * 0.4), cutText(table.concat(parts, ", "), "", tw, L.f.cap), COLORS.muted, L.f.cap)
+    if st.line then
+      if counting then tw = tw - countdownW(L, "Flight page") - L.x(18) end
+      btext(tx, by + bh - L.s(8), cutText(st.line, "", tw, L.f.value),
+            p.armBlocked and WARN_COL or COLORS.fg, L.f.value)
+    end
+  end
+
+  function drawPre(ctx)
+    local w = ctx.w
+    local p, st = w and w.pre, w and w.preStatus
+    if not (p and st) then return end
+    local z = ctx.zone
+    if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
+    local L = flightLayout(z)
+    local top = L.y(PRE_COLS_H)
+    local c = columns(L, z, w.on, top)
+    lcd.drawFilledRectangle(0, top, z.w, 1, COLORS.track)
+    if p.batt and p.batt.packs and c[1] then
+      drawPackList(L, c[1], c[2], p.batt, ctx)
+    else
+      ctx.marqueeRow = nil   -- next selection starts its marquee anew
+      if p.batt and c[1] then drawPreBattery(L, c[1], c[2], p.batt, st) end
+    end
+    if p.gps and c[3] then drawPreGps(L, c[3], c[4], p.gps, st) end
+    if p.link and c[5] then drawPreLink(L, c[5], c[6], p.link, st, w.linkUp) end
+    local fs = w.fs
+    local counting = fs and fs.readySince and w.phase == core.PRE
+    drawReady(L, z, top, p, st, counting)
+    if counting then   -- GO: countdown to the flight page
+      drawCountdown(z, secsLeft(fs.readySince, core.PRE_HOLD_T), core.PRE_HOLD_T / 1000, "Flight page")
+    end
   end
 end
 
@@ -1837,130 +1959,133 @@ end
 -- flown), the flight's values per module in the flight page's columns, the
 -- alerts with their flight time below and the countdown to the wait page.
 -- ---------------------------------------------------------------------------
-local POST_KPI_H  = 100   -- key figure strip (design px of the 418 body)
-local POST_COLS_B = 306   -- columns end here
-local POST_ROW0, POST_ROW_H = 62, 30   -- first value row (offset in the column), pitch
-local ALERT_ROW_H = 24
+local drawPost
+do
+  local POST_KPI_H  = 100   -- key figure strip (design px of the 418 body)
+  local POST_COLS_B = 306   -- columns end here
+  local POST_ROW0, POST_ROW_H = 62, 30   -- first value row (offset in the column), pitch
+  local ALERT_ROW_H = 24
 
-local function kmText(m) return m and string.format("%.1f", m * U.f / U.big) or "--" end   -- km or mi
+  local function kmText(m) return m and string.format("%.1f", m * U.f / U.big) or "--" end   -- km or mi
 
--- One key figure: caption over a big value with a smaller unit, centred on cx.
--- cap: text, or { long, short } (the short one when the long one is wider than maxW).
-local function drawKpi(L, cx, cap, value, unit, col, maxW)
-  local f, uf = L.f.hero, L.f.unit
-  if type(cap) == "table" then cap = textW(cap[1], L.f.cap) <= maxW and cap[1] or cap[2] end
-  -- The caption sits a fixed gap above the number's capitals, so the gap looks
-  -- the same with the big font (800 px) and the smaller one (480 px).
-  local valY = L.y(86)
-  local capY = valY - math.floor(fontH(f) * CAP_H + 0.5) - L.s(14)
-  btext(cx - math.floor(textW(cap, L.f.cap) / 2), capY, cap, COLORS.muted, L.f.cap)
-  local vw = textW(value, f)
-  local uw = unit and (L.s(6) + textW(unit, uf)) or 0
-  local x0 = cx - math.floor((vw + uw) / 2)
-  btext(x0, valY, value, col or COLORS.fg, f)
-  if unit then btext(x0 + vw + L.s(6), valY, unit, col or COLORS.fg, uf) end
-end
+  -- One key figure: caption over a big value with a smaller unit, centred on cx.
+  -- cap: text, or { long, short } (the short one when the long one is wider than maxW).
+  local function drawKpi(L, cx, cap, value, unit, col, maxW)
+    local f, uf = L.f.hero, L.f.unit
+    if type(cap) == "table" then cap = textW(cap[1], L.f.cap) <= maxW and cap[1] or cap[2] end
+    -- The caption sits a fixed gap above the number's capitals, so the gap looks
+    -- the same with the big font (800 px) and the smaller one (480 px).
+    local valY = L.y(86)
+    local capY = valY - math.floor(fontH(f) * CAP_H + 0.5) - L.s(14)
+    btext(cx - math.floor(textW(cap, L.f.cap) / 2), capY, cap, COLORS.muted, L.f.cap)
+    local vw = textW(value, f)
+    local uw = unit and (L.s(6) + textW(unit, uf)) or 0
+    local x0 = cx - math.floor((vw + uw) / 2)
+    btext(x0, valY, value, col or COLORS.fg, f)
+    if unit then btext(x0 + vw + L.s(6), valY, unit, col or COLORS.fg, uf) end
+  end
 
--- Label left, value right, rows from the column top.
--- Label: text, or { long, short } (the short one when the long one does not fit
--- beside the value); a label that does not fit at all is left out, the value stays.
-local function drawRows(L, x, w, rows)
-  for i, row in ipairs(rows) do
-    local base  = L.y(POST_KPI_H + POST_ROW0 + (i - 1) * POST_ROW_H)
-    local label = row[1]
-    local room  = w - textW(row[2], L.f.value) - (row[4] and textW(row[4], L.f.value) or 0) - L.s(6)
-    if type(label) == "table" then
-      label = textW(label[1], L.f.label) <= room and label[1] or label[2]
+  -- Label left, value right, rows from the column top.
+  -- Label: text, or { long, short } (the short one when the long one does not fit
+  -- beside the value); a label that does not fit at all is left out, the value stays.
+  local function drawRows(L, x, w, rows)
+    for i, row in ipairs(rows) do
+      local base  = L.y(POST_KPI_H + POST_ROW0 + (i - 1) * POST_ROW_H)
+      local label = row[1]
+      local room  = w - textW(row[2], L.f.value) - (row[4] and textW(row[4], L.f.value) or 0) - L.s(6)
+      if type(label) == "table" then
+        label = textW(label[1], L.f.label) <= room and label[1] or label[2]
+      end
+      if textW(label, L.f.label) <= room then btext(x, base, label, COLORS.muted, L.f.label) end
+      rtext(x + w, base, row[2], row[3] or COLORS.fg, L.f.value)
+      if row[4] then rtext(x + w - textW(row[2], L.f.value), base, row[4], COLORS.fg, L.f.value) end   -- lead-in, text colour
     end
-    if textW(label, L.f.label) <= room then btext(x, base, label, COLORS.muted, L.f.label) end
-    rtext(x + w, base, row[2], row[3] or COLORS.fg, L.f.value)
-    if row[4] then rtext(x + w - textW(row[2], L.f.value), base, row[4], COLORS.fg, L.f.value) end   -- lead-in, text colour
   end
-end
 
-local function drawPostColumns(L, c, p)
-  local b, g, l = p.batt, p.gps, p.link
-  if b and c[1] then
-    drawTitle(L, c[1], packTitle(L, c[2], b.name, b.nameShort), POST_KPI_H)
-    local lastV = b.cell and fmt("%.2f V", b.cell) or "--"
-    drawRows(L, c[1], c[2], {
-      { "CHARGE", fmt("%d %%", b.left), smallCol(b.level), fmt("%d %%", b.start) .. " -> " },
-      { { "LAST PER CELL", "LAST CELL" }, lastV, smallCol(b.lastVLevel) },
-      { { "MAX CURRENT", "MAX CURR" }, fmtAmps(b.maxA) },
-      { "PACK CYCLES", b.cycles or "--" },
-    })
+  local function drawPostColumns(L, c, p)
+    local b, g, l = p.batt, p.gps, p.link
+    if b and c[1] then
+      drawTitle(L, c[1], packTitle(L, c[2], b.name, b.nameShort), POST_KPI_H)
+      local lastV = b.cell and fmt("%.2f V", b.cell) or "--"
+      drawRows(L, c[1], c[2], {
+        { "CHARGE", fmt("%d %%", b.left), smallCol(b.level), fmt("%d %%", b.start) .. " -> " },
+        { { "LAST PER CELL", "LAST CELL" }, lastV, smallCol(b.lastVLevel) },
+        { { "MAX CURRENT", "MAX CURR" }, fmtAmps(b.maxA) },
+        { "PACK CYCLES", b.cycles or "--" },
+      })
+    end
+    if g and c[3] then
+      drawTitle(L, c[3], "GPS", POST_KPI_H)
+      local co = g.coord or function(v) return string.format("%.5f", v) end
+      drawRows(L, c[3], c[4], {
+        { { "MAX DISTANCE", "MAX DIST" }, distText(g.maxDist), smallCol(g.distLevel) },
+        { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d " .. U.len, g.maxAlt), smallCol(g.altLevel) },
+        { { "MAX SPEED", "MAX SPD" }, fmt("%d " .. U.spd, g.maxSpd) },
+        { { "LAST POSITION", "LAST POS" }, g.lat and co(g.lat) or "--" },
+        { "", g.lon and co(g.lon) or "" },
+      })
+    end
+    if l and c[5] then
+      drawTitle(L, c[5], l.modLine, POST_KPI_H)
+      drawRows(L, c[5], c[6], {
+        { { "LOW LINK QUALITY", "LOW LQ" }, fmt("%d %%", l.minLq), smallCol(l.lqStage) },
+        { "MAX RANGELIMIT", fmt("%d %%", l.maxRange), smallCol(l.rangeStage) },
+        { { "MAX TX POWER", "MAX TX PWR" }, fmt("%d mW", l.maxTpwr) },
+        { "RF MODE", l.mode or "--" },
+      })
+    end
   end
-  if g and c[3] then
-    drawTitle(L, c[3], "GPS", POST_KPI_H)
-    local co = g.coord or function(v) return string.format("%.5f", v) end
-    drawRows(L, c[3], c[4], {
-      { { "MAX DISTANCE", "MAX DIST" }, distText(g.maxDist), smallCol(g.distLevel) },
-      { { "MAX ALTITUDE", "MAX ALT" }, fmt("%d " .. U.len, g.maxAlt), smallCol(g.altLevel) },
-      { { "MAX SPEED", "MAX SPD" }, fmt("%d " .. U.spd, g.maxSpd) },
-      { { "LAST POSITION", "LAST POS" }, g.lat and co(g.lat) or "--" },
-      { "", g.lon and co(g.lon) or "" },
-    })
-  end
-  if l and c[5] then
-    drawTitle(L, c[5], l.modLine, POST_KPI_H)
-    drawRows(L, c[5], c[6], {
-      { { "LOW LINK QUALITY", "LOW LQ" }, fmt("%d %%", l.minLq), smallCol(l.lqStage) },
-      { "MAX RANGELIMIT", fmt("%d %%", l.maxRange), smallCol(l.rangeStage) },
-      { { "MAX TX POWER", "MAX TX PWR" }, fmt("%d mW", l.maxTpwr) },
-      { "RF MODE", l.mode or "--" },
-    })
-  end
-end
 
--- Alerts: newest top left, then down the column and on in the second; six at
--- most, the sixth carrying "+N" for the older ones not shown.
-local function drawAlerts(L, z, p, pad)
-  local top = L.y(POST_COLS_B + 22)
-  local list, n = p.alerts or {}, #(p.alerts or {})
-  btext(pad, top, (n > 6) and ("ALERTS  +" .. (n - 6)) or "ALERTS", COLORS.muted, L.f.label)
-  if n == 0 then
-    btext(pad, L.y(POST_COLS_B + 22 + ALERT_ROW_H), "none", COLORS.muted, L.f.value)
-    return
+  -- Alerts: newest top left, then down the column and on in the second; six at
+  -- most, the sixth carrying "+N" for the older ones not shown.
+  local function drawAlerts(L, z, p, pad)
+    local top = L.y(POST_COLS_B + 22)
+    local list, n = p.alerts or {}, #(p.alerts or {})
+    btext(pad, top, (n > 6) and ("ALERTS  +" .. (n - 6)) or "ALERTS", COLORS.muted, L.f.label)
+    if n == 0 then
+      btext(pad, L.y(POST_COLS_B + 22 + ALERT_ROW_H), "none", COLORS.muted, L.f.value)
+      return
+    end
+    local colW = math.floor((z.w - 2 * pad) * 0.36)
+    for i = 1, math.min(6, n) do
+      local a = list[n - i + 1]   -- newest first
+      local x = pad + ((i > 3) and colW or 0)
+      local base = L.y(POST_COLS_B + 22 + (((i - 1) % 3) + 1) * ALERT_ROW_H)
+      local t = string.format("%02d:%02d", math.floor(a.t / 60), a.t % 60)
+      btext(x, base, t, COLORS.muted, L.f.value)
+      local tx = x + textW("00:00 ", L.f.value)
+      local text = a.text
+      -- bottom right: ends before the countdown
+      if i == 6 then text = cutText(text, "", z.w - pad - countdownW(L, "Wait page") - L.s(12) - tx, L.f.value) end
+      btext(tx, base, text, levelCol(a.level), L.f.value)
+    end
   end
-  local colW = math.floor((z.w - 2 * pad) * 0.36)
-  for i = 1, math.min(6, n) do
-    local a = list[n - i + 1]   -- newest first
-    local x = pad + ((i > 3) and colW or 0)
-    local base = L.y(POST_COLS_B + 22 + (((i - 1) % 3) + 1) * ALERT_ROW_H)
-    local t = string.format("%02d:%02d", math.floor(a.t / 60), a.t % 60)
-    btext(x, base, t, COLORS.muted, L.f.value)
-    local tx = x + textW("00:00 ", L.f.value)
-    local text = a.text
-    -- bottom right: ends before the countdown
-    if i == 6 then text = cutText(text, "", z.w - pad - countdownW(L, "Wait page") - L.s(12) - tx, L.f.value) end
-    btext(tx, base, text, levelCol(a.level), L.f.value)
-  end
-end
 
-local function drawPost(ctx)
-  local w = ctx.w
-  local p = w and w.post
-  if not p then return end
-  local z = ctx.zone
-  if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
-  local L = flightLayout(z)
-  local b, g = p.batt or {}, p.gps or {}
-  local third = math.floor(z.w / 3)
-  -- key figures: text colour, yellow or red only on a problem
-  drawKpi(L, math.floor(third / 2), "FLIGHT TIME", p.time or "--", nil, smallCol(p.timeLevel))
-  drawKpi(L, third + math.floor(third / 2), { "USED CAPACITY", "USED CAP" }, fmt("%d", b.used), "mAh",
-          smallCol(b.level), third - L.s(16))
-  drawKpi(L, 2 * third + math.floor(third / 2), "FLOWN", kmText(g.flown), U.bigU)
-  local kpiB, colsB = L.y(POST_KPI_H), L.y(POST_COLS_B)
-  lcd.drawFilledRectangle(0, kpiB, z.w, 1, COLORS.track)
-  lcd.drawFilledRectangle(0, colsB, z.w, 1, COLORS.track)
-  local c = columns(L, z, w.on, colsB, kpiB)
-  drawPostColumns(L, c, p)
-  local pad = L.x(18)
-  drawAlerts(L, z, p, pad)
-  -- Countdown to the wait page (demo data brings its own seconds; reopened by stick: from then).
-  local left = p.leftS or secsLeft(w.reviewAt or (w.fs and w.fs.endedAt) or 0, core.ENDED_HOLD_T)
-  drawCountdown(z, left, core.ENDED_HOLD_T / 1000, "Wait page")
+  function drawPost(ctx)
+    local w = ctx.w
+    local p = w and w.post
+    if not p then return end
+    local z = ctx.zone
+    if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
+    local L = flightLayout(z)
+    local b, g = p.batt or {}, p.gps or {}
+    local third = math.floor(z.w / 3)
+    -- key figures: text colour, yellow or red only on a problem
+    drawKpi(L, math.floor(third / 2), "FLIGHT TIME", p.time or "--", nil, smallCol(p.timeLevel))
+    drawKpi(L, third + math.floor(third / 2), { "USED CAPACITY", "USED CAP" }, fmt("%d", b.used), "mAh",
+            smallCol(b.level), third - L.s(16))
+    drawKpi(L, 2 * third + math.floor(third / 2), "FLOWN", kmText(g.flown), U.bigU)
+    local kpiB, colsB = L.y(POST_KPI_H), L.y(POST_COLS_B)
+    lcd.drawFilledRectangle(0, kpiB, z.w, 1, COLORS.track)
+    lcd.drawFilledRectangle(0, colsB, z.w, 1, COLORS.track)
+    local c = columns(L, z, w.on, colsB, kpiB)
+    drawPostColumns(L, c, p)
+    local pad = L.x(18)
+    drawAlerts(L, z, p, pad)
+    -- Countdown to the wait page (demo data brings its own seconds; reopened by stick: from then).
+    local left = p.leftS or secsLeft(w.reviewAt or (w.fs and w.fs.endedAt) or 0, core.ENDED_HOLD_T)
+    drawCountdown(z, left, core.ENDED_HOLD_T / 1000, "Wait page")
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -1974,366 +2099,369 @@ end
 -- shapes, so the rocking figure is built from triangles and circles at rotated
 -- points.
 -- ---------------------------------------------------------------------------
-local WAIT_TITLE = "LOOKING FOR THE MODEL"
-local WAIT_SUB   = "No telemetry yet"
-local ROCK_T, ARC_T, BLINK_T = 500, 180, 500   -- periods in getTime ticks
-local ROCK_DEG = 6                             -- rocking amplitude
-local LOOK_T, LOOK_FROM, LOOK_TO, LOOK_EASE = 800, 450, 650, 20   -- looks ahead 2 s every 8 s
-local PIVOT_U, PIVOT_V = 75, 100               -- rocking point (design units)
-local ARC_R = { 12, 20, 28 }
-local ANT_DEG = -20    -- antenna leans left, arcs follow it
-local TIP_DIM = 0.35   -- antenna tip at its dimmest: 35 % red
-local PROP_DEG = 3     -- prop turn per getTime tick
-local ERR_TITLE = "Configuration error"
-local ERR_LINES = { "Please check", "Tool Flight Bag" }
+local mascot, drawBubble, drawWait
+do
+  local WAIT_TITLE = "LOOKING FOR THE MODEL"
+  local WAIT_SUB   = "No telemetry yet"
+  local ROCK_T, ARC_T, BLINK_T = 500, 180, 500   -- periods in getTime ticks
+  local ROCK_DEG = 6                             -- rocking amplitude
+  local LOOK_T, LOOK_FROM, LOOK_TO, LOOK_EASE = 800, 450, 650, 20   -- looks ahead 2 s every 8 s
+  local PIVOT_U, PIVOT_V = 75, 100               -- rocking point (design units)
+  local ARC_R = { 12, 20, 28 }
+  local ANT_DEG = -20    -- antenna leans left, arcs follow it
+  local TIP_DIM = 0.35   -- antenna tip at its dimmest: 35 % red
+  local PROP_DEG = 3     -- prop turn per getTime tick
+  local ERR_TITLE = "Configuration error"
+  local ERR_LINES = { "Please check", "Tool Flight Bag" }
 
--- Quad parts, same in Dark and Light.
-local CARBON    = lcd.RGB( 38,  38,  38)
-local PLATE     = lcd.RGB( 42,  42,  42)
-local TPU       = lcd.RGB( 90, 160,  32)
-local BATT      = lcd.RGB(240, 192,  32)
-local BATT_TOP  = lcd.RGB(246, 216,  96)
-local STRAP_TOP = lcd.RGB(155, 224,  90)
-local LENS      = lcd.RGB( 28,  47,  69)
+  -- Quad parts, same in Dark and Light.
+  local CARBON    = lcd.RGB( 38,  38,  38)
+  local PLATE     = lcd.RGB( 42,  42,  42)
+  local TPU       = lcd.RGB( 90, 160,  32)
+  local BATT      = lcd.RGB(240, 192,  32)
+  local BATT_TOP  = lcd.RGB(246, 216,  96)
+  local STRAP_TOP = lcd.RGB(155, 224,  90)
+  local LENS      = lcd.RGB( 28,  47,  69)
 
--- Props: centre, radii, blade angle, turning direction (diagonal pairs alike).
-local REAR_PROPS  = { { 38, 66, 20, 5.5, 60, 1 }, { 112, 66, 20, 5.5, 0, -1 } }
-local FRONT_PROPS = { { 22, 86, 25, 7, 20, -1 }, { 128, 86, 25, 7, 80, 1 } }
+  -- Props: centre, radii, blade angle, turning direction (diagonal pairs alike).
+  local REAR_PROPS  = { { 38, 66, 20, 5.5, 60, 1 }, { 112, 66, 20, 5.5, 0, -1 } }
+  local FRONT_PROPS = { { 22, 86, 25, 7, 20, -1 }, { 128, 86, 25, 7, 80, 1 } }
 
--- Unit directions along each corner arc (top right, bottom right, bottom left,
--- top left; clockwise on screen).
-local CORNER_STEPS = 5
-local CORNER_DIRS = {}
-for q = 1, 4 do
-  CORNER_DIRS[q] = {}
-  for i = 0, CORNER_STEPS do
-    local a = math.rad(-90 + (q - 1) * 90 + i * 90 / CORNER_STEPS)
-    CORNER_DIRS[q][i + 1] = { math.cos(a), math.sin(a) }
+  -- Unit directions along each corner arc (top right, bottom right, bottom left,
+  -- top left; clockwise on screen).
+  local CORNER_STEPS = 5
+  local CORNER_DIRS = {}
+  for q = 1, 4 do
+    CORNER_DIRS[q] = {}
+    for i = 0, CORNER_STEPS do
+      local a = math.rad(-90 + (q - 1) * 90 + i * 90 / CORNER_STEPS)
+      CORNER_DIRS[q][i + 1] = { math.cos(a), math.sin(a) }
+    end
   end
-end
 
--- Unit circle for the prop discs.
-local ELLIPSE_STEPS = 10
-local ELLIPSE_DIRS = {}
-for i = 1, ELLIPSE_STEPS do
-  local a = 2 * math.pi * i / ELLIPSE_STEPS
-  ELLIPSE_DIRS[i] = { math.cos(a), math.sin(a) }
-end
+  -- Unit circle for the prop discs.
+  local ELLIPSE_STEPS = 10
+  local ELLIPSE_DIRS = {}
+  for i = 1, ELLIPSE_STEPS do
+    local a = 2 * math.pi * i / ELLIPSE_STEPS
+    ELLIPSE_DIRS[i] = { math.cos(a), math.sin(a) }
+  end
 
-local function drawScout(mx, my, k, t, sad)
-  local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
-  local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
-  -- Design point rotated about the pivot (positive = clockwise), in pixels.
-  local function P(u, v)
-    local du, dv = u - PIVOT_U, v - PIVOT_V
-    return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
-           math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
-  end
-  local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
-  local function rect(u, v, w, h, col)
-    local x1, y1 = P(u, v)
-    local x2, y2 = P(u + w, v)
-    local x3, y3 = P(u + w, v + h)
-    local x4, y4 = P(u, v + h)
-    fillTri(x1, y1, x2, y2, x3, y3, col)
-    fillTri(x1, y1, x3, y3, x4, y4, col)
-  end
-  -- Rounded rectangle as one convex polygon (CORNER_STEPS segments per corner),
-  -- filled as a fan from its centre: no seams between separately rounded parts.
-  local function rounded(u, v, w, h, r, col)
-    local cu, cv = P(u + w / 2, v + h / 2)
-    local fx, fy
-    local px, py
-    for qi, q in ipairs({ { u + w - r, v + r }, { u + w - r, v + h - r }, { u + r, v + h - r }, { u + r, v + r } }) do
-      for _, d in ipairs(CORNER_DIRS[qi]) do
-        local x, y = P(q[1] + r * d[1], q[2] + r * d[2])
-        if px then fillTri(cu, cv, px, py, x, y, col) else fx, fy = x, y end
+  local function drawScout(mx, my, k, t, sad)
+    local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
+    local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
+    -- Design point rotated about the pivot (positive = clockwise), in pixels.
+    local function P(u, v)
+      local du, dv = u - PIVOT_U, v - PIVOT_V
+      return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
+             math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
+    end
+    local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
+    local function rect(u, v, w, h, col)
+      local x1, y1 = P(u, v)
+      local x2, y2 = P(u + w, v)
+      local x3, y3 = P(u + w, v + h)
+      local x4, y4 = P(u, v + h)
+      fillTri(x1, y1, x2, y2, x3, y3, col)
+      fillTri(x1, y1, x3, y3, x4, y4, col)
+    end
+    -- Rounded rectangle as one convex polygon (CORNER_STEPS segments per corner),
+    -- filled as a fan from its centre: no seams between separately rounded parts.
+    local function rounded(u, v, w, h, r, col)
+      local cu, cv = P(u + w / 2, v + h / 2)
+      local fx, fy
+      local px, py
+      for qi, q in ipairs({ { u + w - r, v + r }, { u + w - r, v + h - r }, { u + r, v + h - r }, { u + r, v + r } }) do
+        for _, d in ipairs(CORNER_DIRS[qi]) do
+          local x, y = P(q[1] + r * d[1], q[2] + r * d[2])
+          if px then fillTri(cu, cv, px, py, x, y, col) else fx, fy = x, y end
+          px, py = x, y
+        end
+      end
+      fillTri(cu, cv, px, py, fx, fy, col)
+    end
+    local function circle(u, v, r, col)
+      local x, y = P(u, v)
+      lcd.drawFilledCircle(x, y, S(r), col)
+    end
+
+    -- Shadow stays put.
+    fillRounded(math.floor(mx + 49 * k + 0.5), math.floor(my + 106 * k + 0.5), S(52), S(5), S(2), COLORS.track)
+
+    -- Antenna on top of the head, arcs around its tip.
+    local bx, by = P(75, 46)
+    local ex, ey = P(75, 28)
+    local tx, ty = P(75, 23)
+    thickLine(bx, by, ex, ey, COLORS.muted)
+    if sad then
+      drawHeartbeat(tx, ty, S(5), nil, TIP_DIM)   -- tip stays dim, no arcs
+    elseif lcd.drawAnnulus then
+      local w = math.max(2, math.floor(3 * k + 0.5))
+      for i, r in ipairs(ARC_R) do
+        local ph = ((t - (i - 1) * 30) % ARC_T) / ARC_T
+        if ph > 0.1 and ph < 0.65 then
+          local ro = math.floor(r * k + 0.5)
+          lcd.drawAnnulus(tx, ty, ro - w, ro, (deg - 45) % 360, (deg + 45) % 360, COLORS.accent)
+        end
+      end
+    end
+    if not sad then drawHeartbeat(tx, ty, S(5), TIP_DIM) end   -- tip pulses like the heartbeat, dimmed only
+
+    -- Head: accent rim around the body colour, ears on both sides.
+    rounded(34, 64, 6, 18, 2, COLORS.muted)
+    rounded(110, 64, 6, 18, 2, COLORS.muted)
+    rounded(40, 46, 70, 56, 16, COLORS.accent)
+    rounded(43, 49, 64, 50, 13, COLORS.head)
+
+    -- Eyes looking up at the antenna, now and then straight ahead (pupils glide
+    -- down and back); a short blink once per rock.
+    local lt = t % LOOK_T
+    local ahead = math.max(0, math.min(1, (lt - LOOK_FROM) / LOOK_EASE, (LOOK_TO - lt) / LOOK_EASE))
+    local pupilV = sad and 73 or (67 + 3 * ahead)   -- sad: looks down
+    local blink = (t % BLINK_T) >= 290 and (t % BLINK_T) < 305
+    for _, eu in ipairs({ 62, 88 }) do
+      if blink then
+        rect(eu - 8, 69, 16, 3, WHITE)
+      else
+        if COLORS.eyeRing then circle(eu, 70, 9.5, COLORS.eyeRing) end
+        circle(eu, 70, 8, WHITE)
+        circle(eu, pupilV, 4, DARK_TEXT)
+      end
+    end
+    if sad then
+      -- Mouth as a downward arc.
+      local px, py
+      for i = 0, 4 do
+        local s = i / 4   -- quadratic curve (68,93) (75,86) (82,93)
+        local x, y = P(68 + 14 * s, 93 - 14 * s * (1 - s))
+        if px then thickLine(px, py, x, y, COLORS.accent); thickLine(px, py + 1, x, y + 1, COLORS.accent) end
         px, py = x, y
       end
+      return
     end
-    fillTri(cu, cv, px, py, fx, fy, col)
-  end
-  local function circle(u, v, r, col)
-    local x, y = P(u, v)
-    lcd.drawFilledCircle(x, y, S(r), col)
-  end
-
-  -- Shadow stays put.
-  fillRounded(math.floor(mx + 49 * k + 0.5), math.floor(my + 106 * k + 0.5), S(52), S(5), S(2), COLORS.track)
-
-  -- Antenna on top of the head, arcs around its tip.
-  local bx, by = P(75, 46)
-  local ex, ey = P(75, 28)
-  local tx, ty = P(75, 23)
-  thickLine(bx, by, ex, ey, COLORS.muted)
-  if sad then
-    drawHeartbeat(tx, ty, S(5), nil, TIP_DIM)   -- tip stays dim, no arcs
-  elseif lcd.drawAnnulus then
-    local w = math.max(2, math.floor(3 * k + 0.5))
-    for i, r in ipairs(ARC_R) do
-      local ph = ((t - (i - 1) * 30) % ARC_T) / ARC_T
-      if ph > 0.1 and ph < 0.65 then
-        local ro = math.floor(r * k + 0.5)
-        lcd.drawAnnulus(tx, ty, ro - w, ro, (deg - 45) % 360, (deg + 45) % 360, COLORS.accent)
-      end
-    end
-  end
-  if not sad then drawHeartbeat(tx, ty, S(5), TIP_DIM) end   -- tip pulses like the heartbeat, dimmed only
-
-  -- Head: accent rim around the body colour, ears on both sides.
-  rounded(34, 64, 6, 18, 2, COLORS.muted)
-  rounded(110, 64, 6, 18, 2, COLORS.muted)
-  rounded(40, 46, 70, 56, 16, COLORS.accent)
-  rounded(43, 49, 64, 50, 13, COLORS.head)
-
-  -- Eyes looking up at the antenna, now and then straight ahead (pupils glide
-  -- down and back); a short blink once per rock.
-  local lt = t % LOOK_T
-  local ahead = math.max(0, math.min(1, (lt - LOOK_FROM) / LOOK_EASE, (LOOK_TO - lt) / LOOK_EASE))
-  local pupilV = sad and 73 or (67 + 3 * ahead)   -- sad: looks down
-  local blink = (t % BLINK_T) >= 290 and (t % BLINK_T) < 305
-  for _, eu in ipairs({ 62, 88 }) do
-    if blink then
-      rect(eu - 8, 69, 16, 3, WHITE)
-    else
-      if COLORS.eyeRing then circle(eu, 70, 9.5, COLORS.eyeRing) end
-      circle(eu, 70, 8, WHITE)
-      circle(eu, pupilV, 4, DARK_TEXT)
-    end
-  end
-  if sad then
-    -- Mouth as a downward arc.
-    local px, py
-    for i = 0, 4 do
-      local s = i / 4   -- quadratic curve (68,93) (75,86) (82,93)
-      local x, y = P(68 + 14 * s, 93 - 14 * s * (1 - s))
-      if px then thickLine(px, py, x, y, COLORS.accent); thickLine(px, py + 1, x, y + 1, COLORS.accent) end
-      px, py = x, y
-    end
-    return
-  end
-  local mx2, my2 = P(75, 89)
-  lcd.drawCircle(mx2, my2, S(4), COLORS.accent)
-  lcd.drawCircle(mx2, my2, S(3), COLORS.accent)
-end
-
-local function drawQuad(mx, my, k, t, sad)
-  local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
-  local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
-  -- Design point rotated about the pivot (positive = clockwise), in pixels.
-  local function P(u, v)
-    local du, dv = u - PIVOT_U, v - PIVOT_V
-    return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
-           math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
-  end
-  local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
-  local function quad(u1, v1, u2, v2, u3, v3, u4, v4, col)
-    local x1, y1 = P(u1, v1)
-    local x2, y2 = P(u2, v2)
-    local x3, y3 = P(u3, v3)
-    local x4, y4 = P(u4, v4)
-    fillTri(x1, y1, x2, y2, x3, y3, col)
-    fillTri(x1, y1, x3, y3, x4, y4, col)
-  end
-  local function rect(u, v, w, h, col) quad(u, v, u + w, v, u + w, v + h, u, v + h, col) end
-  -- Straight bar of width w (design units) from one point to another.
-  local function bar(u1, v1, u2, v2, w, col)
-    local du, dv = u2 - u1, v2 - v1
-    local f = w / 2 / math.sqrt(du * du + dv * dv)
-    local nu, nv = -dv * f, du * f
-    quad(u1 + nu, v1 + nv, u2 + nu, v2 + nv, u2 - nu, v2 - nv, u1 - nu, v1 - nv, col)
-  end
-  -- Convex polygons filled as a fan from their centre: no seams.
-  local function ellipse(u, v, rx, ry, col)
-    local cu, cv = P(u, v)
-    local px, py = P(u + rx, v)
-    for _, d in ipairs(ELLIPSE_DIRS) do
-      local x, y = P(u + rx * d[1], v + ry * d[2])
-      fillTri(cu, cv, px, py, x, y, col)
-      px, py = x, y
-    end
-  end
-  -- Rounded rectangle as one convex polygon (CORNER_STEPS segments per corner).
-  local function rounded(u, v, w, h, r, col)
-    local cu, cv = P(u + w / 2, v + h / 2)
-    local fx, fy
-    local px, py
-    for qi, q in ipairs({ { u + w - r, v + r }, { u + w - r, v + h - r }, { u + r, v + h - r }, { u + r, v + r } }) do
-      for _, d in ipairs(CORNER_DIRS[qi]) do
-        local x, y = P(q[1] + r * d[1], q[2] + r * d[2])
-        if px then fillTri(cu, cv, px, py, x, y, col) else fx, fy = x, y end
-        px, py = x, y
-      end
-    end
-    fillTri(cu, cv, px, py, fx, fy, col)
-  end
-  local function circle(u, v, r, col)
-    local x, y = P(u, v)
-    lcd.drawFilledCircle(x, y, S(r), col)
-  end
-  -- Prop: disc and three blades (2 px lines, cheap) while spinning, only the
-  -- blades when stopped.
-  local spin = sad and 0 or t * PROP_DEG
-  local function prop(p)
-    local u, v, rx, ry = p[1], p[2], p[3], p[4]
-    if not sad then ellipse(u, v, rx, ry, COLORS.disc) end
-    local cx, cy = P(u, v)
-    for i = 0, 2 do
-      local a = math.rad(p[5] + p[6] * spin + i * 120)
-      local x, y = P(u + rx * math.cos(a), v + ry * math.sin(a))
-      thickLine(cx, cy, x, y, COLORS.accent)
-      thickLine(cx, cy + 1, x, y + 1, COLORS.accent)
-    end
-  end
-
-  -- Shadow stays put.
-  fillRounded(math.floor(mx + 22 * k + 0.5), math.floor(my + 112 * k + 0.5), S(106), S(6), S(3), COLORS.track)
-
-  -- Rear arms, motors and props behind the body.
-  bar(75, 80, 38, 74, 4, CARBON)
-  bar(75, 80, 112, 74, 4, CARBON)
-  rect(33, 68, 10, 8, COLORS.muted)
-  rect(107, 68, 10, 8, COLORS.muted)
-  for _, p in ipairs(REAR_PROPS) do prop(p) end
-
-  -- Top plate, battery (top face lighter) with strap.
-  quad(52, 52, 98, 52, 100, 58, 50, 58, PLATE)
-  quad(58, 30, 92, 30, 95, 38, 55, 38, BATT_TOP)
-  rect(55, 38, 40, 15, BATT)
-  rect(55, 38, 40, 4, PLATE)
-  quad(72, 30, 78, 30, 79, 38, 71, 38, STRAP_TOP)
-  rect(71, 38, 8, 15, COLORS.accent)
-
-  -- Antenna from the battery, arcs around its tip.
-  bar(64, 34, 58, 18, 2.5, COLORS.muted)
-  local tx, ty = P(57, 14)
-  if sad then
-    drawHeartbeat(tx, ty, S(5), nil, TIP_DIM)   -- tip stays dim, no arcs
-  elseif lcd.drawAnnulus then
-    local w = math.max(2, math.floor(3 * k + 0.5))
-    local dir = deg + ANT_DEG
-    for i, r in ipairs(ARC_R) do
-      local ph = ((t - (i - 1) * 30) % ARC_T) / ARC_T
-      if ph > 0.1 and ph < 0.65 then
-        local ro = math.floor(r * k + 0.5)
-        lcd.drawAnnulus(tx, ty, ro - w, ro, (dir - 45) % 360, (dir + 45) % 360, COLORS.accent)
-      end
-    end
-  end
-  if not sad then drawHeartbeat(tx, ty, S(5), TIP_DIM) end   -- tip pulses like the heartbeat, dimmed only
-
-  -- Front arms, bottom plate, front motors with accent caps.
-  bar(75, 96, 22, 100, 6, CARBON)
-  bar(75, 96, 128, 100, 6, CARBON)
-  quad(50, 96, 100, 96, 104, 102, 46, 102, PLATE)
-  rect(15, 90, 14, 12, COLORS.muted)
-  rect(121, 90, 14, 12, COLORS.muted)
-  rect(15, 88, 14, 4, COLORS.accent)
-  rect(121, 88, 14, 4, COLORS.accent)
-
-  -- Camera as the face: TPU mount, accent rim, the real lens small on the forehead.
-  rect(47, 64, 5, 32, TPU)
-  rect(98, 64, 5, 32, TPU)
-  rounded(51, 60, 48, 40, 9, COLORS.accent)
-  rounded(54, 63, 42, 34, 7, COLORS.head)
-  circle(75, 67, 1.5, LENS)
-
-  -- Eyes looking up at the antenna, now and then straight ahead (pupils glide
-  -- down and back); a short blink once per rock.
-  local lt = t % LOOK_T
-  local ahead = math.max(0, math.min(1, (lt - LOOK_FROM) / LOOK_EASE, (LOOK_TO - lt) / LOOK_EASE))
-  local pupilV = sad and 81 or (75 + 3 * ahead)   -- sad: looks down
-  local blink = (t % BLINK_T) >= 290 and (t % BLINK_T) < 305
-  for _, eu in ipairs({ 66, 84 }) do
-    if blink then
-      rect(eu - 7, 77, 14, 3, WHITE)
-    else
-      if COLORS.eyeRing then circle(eu, 78, 8.5, COLORS.eyeRing) end
-      circle(eu, 78, 7, WHITE)
-      circle(eu, pupilV, 3.5, DARK_TEXT)
-    end
-  end
-  if sad then
-    -- Mouth as a downward arc.
-    local px, py
-    for i = 0, 4 do
-      local s = i / 4   -- quadratic curve (70,95) (75,89) (80,95)
-      local x, y = P(70 + 10 * s, 95 - 12 * s * (1 - s))
-      if px then thickLine(px, py, x, y, COLORS.accent); thickLine(px, py + 1, x, y + 1, COLORS.accent) end
-      px, py = x, y
-    end
-  else
-    local mx2, my2 = P(75, 91)
+    local mx2, my2 = P(75, 89)
+    lcd.drawCircle(mx2, my2, S(4), COLORS.accent)
     lcd.drawCircle(mx2, my2, S(3), COLORS.accent)
-    lcd.drawCircle(mx2, my2, S(2), COLORS.accent)
   end
 
-  -- Front props over the arms and the sides of the face, hubs on top.
-  for _, p in ipairs(FRONT_PROPS) do
-    prop(p)
-    circle(p[1], p[2], 2.5, TPU)
+  local function drawQuad(mx, my, k, t, sad)
+    local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
+    local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
+    -- Design point rotated about the pivot (positive = clockwise), in pixels.
+    local function P(u, v)
+      local du, dv = u - PIVOT_U, v - PIVOT_V
+      return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
+             math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
+    end
+    local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
+    local function quad(u1, v1, u2, v2, u3, v3, u4, v4, col)
+      local x1, y1 = P(u1, v1)
+      local x2, y2 = P(u2, v2)
+      local x3, y3 = P(u3, v3)
+      local x4, y4 = P(u4, v4)
+      fillTri(x1, y1, x2, y2, x3, y3, col)
+      fillTri(x1, y1, x3, y3, x4, y4, col)
+    end
+    local function rect(u, v, w, h, col) quad(u, v, u + w, v, u + w, v + h, u, v + h, col) end
+    -- Straight bar of width w (design units) from one point to another.
+    local function bar(u1, v1, u2, v2, w, col)
+      local du, dv = u2 - u1, v2 - v1
+      local f = w / 2 / math.sqrt(du * du + dv * dv)
+      local nu, nv = -dv * f, du * f
+      quad(u1 + nu, v1 + nv, u2 + nu, v2 + nv, u2 - nu, v2 - nv, u1 - nu, v1 - nv, col)
+    end
+    -- Convex polygons filled as a fan from their centre: no seams.
+    local function ellipse(u, v, rx, ry, col)
+      local cu, cv = P(u, v)
+      local px, py = P(u + rx, v)
+      for _, d in ipairs(ELLIPSE_DIRS) do
+        local x, y = P(u + rx * d[1], v + ry * d[2])
+        fillTri(cu, cv, px, py, x, y, col)
+        px, py = x, y
+      end
+    end
+    -- Rounded rectangle as one convex polygon (CORNER_STEPS segments per corner).
+    local function rounded(u, v, w, h, r, col)
+      local cu, cv = P(u + w / 2, v + h / 2)
+      local fx, fy
+      local px, py
+      for qi, q in ipairs({ { u + w - r, v + r }, { u + w - r, v + h - r }, { u + r, v + h - r }, { u + r, v + r } }) do
+        for _, d in ipairs(CORNER_DIRS[qi]) do
+          local x, y = P(q[1] + r * d[1], q[2] + r * d[2])
+          if px then fillTri(cu, cv, px, py, x, y, col) else fx, fy = x, y end
+          px, py = x, y
+        end
+      end
+      fillTri(cu, cv, px, py, fx, fy, col)
+    end
+    local function circle(u, v, r, col)
+      local x, y = P(u, v)
+      lcd.drawFilledCircle(x, y, S(r), col)
+    end
+    -- Prop: disc and three blades (2 px lines, cheap) while spinning, only the
+    -- blades when stopped.
+    local spin = sad and 0 or t * PROP_DEG
+    local function prop(p)
+      local u, v, rx, ry = p[1], p[2], p[3], p[4]
+      if not sad then ellipse(u, v, rx, ry, COLORS.disc) end
+      local cx, cy = P(u, v)
+      for i = 0, 2 do
+        local a = math.rad(p[5] + p[6] * spin + i * 120)
+        local x, y = P(u + rx * math.cos(a), v + ry * math.sin(a))
+        thickLine(cx, cy, x, y, COLORS.accent)
+        thickLine(cx, cy + 1, x, y + 1, COLORS.accent)
+      end
+    end
+
+    -- Shadow stays put.
+    fillRounded(math.floor(mx + 22 * k + 0.5), math.floor(my + 112 * k + 0.5), S(106), S(6), S(3), COLORS.track)
+
+    -- Rear arms, motors and props behind the body.
+    bar(75, 80, 38, 74, 4, CARBON)
+    bar(75, 80, 112, 74, 4, CARBON)
+    rect(33, 68, 10, 8, COLORS.muted)
+    rect(107, 68, 10, 8, COLORS.muted)
+    for _, p in ipairs(REAR_PROPS) do prop(p) end
+
+    -- Top plate, battery (top face lighter) with strap.
+    quad(52, 52, 98, 52, 100, 58, 50, 58, PLATE)
+    quad(58, 30, 92, 30, 95, 38, 55, 38, BATT_TOP)
+    rect(55, 38, 40, 15, BATT)
+    rect(55, 38, 40, 4, PLATE)
+    quad(72, 30, 78, 30, 79, 38, 71, 38, STRAP_TOP)
+    rect(71, 38, 8, 15, COLORS.accent)
+
+    -- Antenna from the battery, arcs around its tip.
+    bar(64, 34, 58, 18, 2.5, COLORS.muted)
+    local tx, ty = P(57, 14)
+    if sad then
+      drawHeartbeat(tx, ty, S(5), nil, TIP_DIM)   -- tip stays dim, no arcs
+    elseif lcd.drawAnnulus then
+      local w = math.max(2, math.floor(3 * k + 0.5))
+      local dir = deg + ANT_DEG
+      for i, r in ipairs(ARC_R) do
+        local ph = ((t - (i - 1) * 30) % ARC_T) / ARC_T
+        if ph > 0.1 and ph < 0.65 then
+          local ro = math.floor(r * k + 0.5)
+          lcd.drawAnnulus(tx, ty, ro - w, ro, (dir - 45) % 360, (dir + 45) % 360, COLORS.accent)
+        end
+      end
+    end
+    if not sad then drawHeartbeat(tx, ty, S(5), TIP_DIM) end   -- tip pulses like the heartbeat, dimmed only
+
+    -- Front arms, bottom plate, front motors with accent caps.
+    bar(75, 96, 22, 100, 6, CARBON)
+    bar(75, 96, 128, 100, 6, CARBON)
+    quad(50, 96, 100, 96, 104, 102, 46, 102, PLATE)
+    rect(15, 90, 14, 12, COLORS.muted)
+    rect(121, 90, 14, 12, COLORS.muted)
+    rect(15, 88, 14, 4, COLORS.accent)
+    rect(121, 88, 14, 4, COLORS.accent)
+
+    -- Camera as the face: TPU mount, accent rim, the real lens small on the forehead.
+    rect(47, 64, 5, 32, TPU)
+    rect(98, 64, 5, 32, TPU)
+    rounded(51, 60, 48, 40, 9, COLORS.accent)
+    rounded(54, 63, 42, 34, 7, COLORS.head)
+    circle(75, 67, 1.5, LENS)
+
+    -- Eyes looking up at the antenna, now and then straight ahead (pupils glide
+    -- down and back); a short blink once per rock.
+    local lt = t % LOOK_T
+    local ahead = math.max(0, math.min(1, (lt - LOOK_FROM) / LOOK_EASE, (LOOK_TO - lt) / LOOK_EASE))
+    local pupilV = sad and 81 or (75 + 3 * ahead)   -- sad: looks down
+    local blink = (t % BLINK_T) >= 290 and (t % BLINK_T) < 305
+    for _, eu in ipairs({ 66, 84 }) do
+      if blink then
+        rect(eu - 7, 77, 14, 3, WHITE)
+      else
+        if COLORS.eyeRing then circle(eu, 78, 8.5, COLORS.eyeRing) end
+        circle(eu, 78, 7, WHITE)
+        circle(eu, pupilV, 3.5, DARK_TEXT)
+      end
+    end
+    if sad then
+      -- Mouth as a downward arc.
+      local px, py
+      for i = 0, 4 do
+        local s = i / 4   -- quadratic curve (70,95) (75,89) (80,95)
+        local x, y = P(70 + 10 * s, 95 - 12 * s * (1 - s))
+        if px then thickLine(px, py, x, y, COLORS.accent); thickLine(px, py + 1, x, y + 1, COLORS.accent) end
+        px, py = x, y
+      end
+    else
+      local mx2, my2 = P(75, 91)
+      lcd.drawCircle(mx2, my2, S(3), COLORS.accent)
+      lcd.drawCircle(mx2, my2, S(2), COLORS.accent)
+    end
+
+    -- Front props over the arms and the sides of the face, hubs on top.
+    for _, p in ipairs(FRONT_PROPS) do
+      prop(p)
+      circle(p[1], p[2], 2.5, TPU)
+    end
   end
-end
 
--- Sad Scout left, yellow speech bubble right (tail towards the head), the
--- group centred; no details here, they are in the settings tool.
--- Mascot chosen in the settings tool; the quad unless "scout".
-local function mascot(w)
-  return (w and w.mascot == "scout") and drawScout or drawQuad
-end
-
--- Sad mascot with a speech bubble: setup error, core missing, widget error.
-local function drawBubble(z, bodyH, draw, title, lines)
-  draw = draw or drawQuad
-  local k = math.min(bodyH / 227, z.w / 480)
-  local th, sh = fontH(BOLD), fontH(SMLSIZE)
-  local pad = math.floor(16 * k + 0.5)
-  local bw = textW(title, BOLD)
-  for _, l in ipairs(lines) do bw = math.max(bw, textW(l, SMLSIZE)) end
-  bw = bw + 2 * pad
-  local bh = 2 * pad + th + math.floor(6 * k + 0.5) + #lines * sh
-  local sw, gap = math.floor(150 * k + 0.5), math.floor(16 * k + 0.5)
-  local x0 = math.floor((z.w - sw - gap - bw) / 2)
-  local my = HDR_H + math.floor((bodyH - 122 * k) / 2)
-  draw(x0, my, k, getTime(), true)
-  local bx = x0 + sw + gap
-  local by = my + math.floor(61 * k + 0.5) - math.floor(bh / 2) - math.floor(12 * k + 0.5)
-  fillRounded(bx, by, bw, bh, math.floor(14 * k + 0.5), WARN_COL)
-  local ty = by + math.floor(43 * k + 0.5)   -- tail on the head's height
-  local tl = math.floor(12 * k + 0.5)
-  fillTri(bx - tl, ty, bx + 1, ty - math.floor(9 * k + 0.5), bx + 1, ty + math.floor(9 * k + 0.5), WARN_COL)
-  dtext(bx + pad, by + pad, title, DARK_TEXT, BOLD)
-  for i, l in ipairs(lines) do
-    dtext(bx + pad, by + pad + th + math.floor(6 * k + 0.5) + (i - 1) * sh, l, DARK_TEXT, SMLSIZE)
+  -- Sad Scout left, yellow speech bubble right (tail towards the head), the
+  -- group centred; no details here, they are in the settings tool.
+  -- Mascot chosen in the settings tool; the quad unless "scout".
+  function mascot(w)
+    return (w and w.mascot == "scout") and drawScout or drawQuad
   end
-end
 
-local function drawWait(ctx)
-  local z = ctx.zone
-  local bodyH = z.h - HDR_H
-  if bodyH < 6 * fontH(SMLSIZE) then return end
-  if ctx.w and ctx.w.setupError then return drawBubble(z, bodyH, mascot(ctx.w), ERR_TITLE, ERR_LINES) end
-  local th, sh = fontH(BOLD), fontH(SMLSIZE)
-  -- Designed for 480 x 272.
-  local k = math.min(bodyH / 227, z.w / 480)
-  local t = getTime()
-  local gap = math.floor(10 * k + 0.5)
-  local blockH = math.floor(122 * k + 0.5) + gap + th + sh
-  local cx = math.floor(z.w / 2)
-  local my = HDR_H + math.floor((bodyH - blockH) / 2)
-  mascot(ctx.w)(cx - 75 * k, my, k, t)
+  -- Sad mascot with a speech bubble: setup error, core missing, widget error.
+  function drawBubble(z, bodyH, draw, title, lines)
+    draw = draw or drawQuad
+    local k = math.min(bodyH / 227, z.w / 480)
+    local th, sh = fontH(BOLD), fontH(SMLSIZE)
+    local pad = math.floor(16 * k + 0.5)
+    local bw = textW(title, BOLD)
+    for _, l in ipairs(lines) do bw = math.max(bw, textW(l, SMLSIZE)) end
+    bw = bw + 2 * pad
+    local bh = 2 * pad + th + math.floor(6 * k + 0.5) + #lines * sh
+    local sw, gap = math.floor(150 * k + 0.5), math.floor(16 * k + 0.5)
+    local x0 = math.floor((z.w - sw - gap - bw) / 2)
+    local my = HDR_H + math.floor((bodyH - 122 * k) / 2)
+    draw(x0, my, k, getTime(), true)
+    local bx = x0 + sw + gap
+    local by = my + math.floor(61 * k + 0.5) - math.floor(bh / 2) - math.floor(12 * k + 0.5)
+    fillRounded(bx, by, bw, bh, math.floor(14 * k + 0.5), WARN_COL)
+    local ty = by + math.floor(43 * k + 0.5)   -- tail on the head's height
+    local tl = math.floor(12 * k + 0.5)
+    fillTri(bx - tl, ty, bx + 1, ty - math.floor(9 * k + 0.5), bx + 1, ty + math.floor(9 * k + 0.5), WARN_COL)
+    dtext(bx + pad, by + pad, title, DARK_TEXT, BOLD)
+    for i, l in ipairs(lines) do
+      dtext(bx + pad, by + pad + th + math.floor(6 * k + 0.5) + (i - 1) * sh, l, DARK_TEXT, SMLSIZE)
+    end
+  end
 
-  -- Title with dots counting up; left edge fixed so the text does not jump.
-  local ty = my + math.floor(122 * k + 0.5) + gap
-  local tx = cx - math.floor(textW(WAIT_TITLE .. "...", BOLD) / 2)
-  dtext(tx, ty, WAIT_TITLE .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
-  dtext(cx, ty + th, (ctx.w and ctx.w.waitSub) or WAIT_SUB, COLORS.muted, SMLSIZE + CENTER)
+  function drawWait(ctx)
+    local z = ctx.zone
+    local bodyH = z.h - HDR_H
+    if bodyH < 6 * fontH(SMLSIZE) then return end
+    if ctx.w and ctx.w.setupError then return drawBubble(z, bodyH, mascot(ctx.w), ERR_TITLE, ERR_LINES) end
+    local th, sh = fontH(BOLD), fontH(SMLSIZE)
+    -- Designed for 480 x 272.
+    local k = math.min(bodyH / 227, z.w / 480)
+    local t = getTime()
+    local gap = math.floor(10 * k + 0.5)
+    local blockH = math.floor(122 * k + 0.5) + gap + th + sh
+    local cx = math.floor(z.w / 2)
+    local my = HDR_H + math.floor((bodyH - blockH) / 2)
+    mascot(ctx.w)(cx - 75 * k, my, k, t)
 
-  -- Gestures: the last summary (while one is kept) and the switch page.
-  local hint = ctx.w and ctx.w.waitHint
-  if hint then
-    drawStickHint(z, { left = hint.review and "Last flight" or nil, right = hint.switches and "Switches" or nil,
-                       hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
+    -- Title with dots counting up; left edge fixed so the text does not jump.
+    local ty = my + math.floor(122 * k + 0.5) + gap
+    local tx = cx - math.floor(textW(WAIT_TITLE .. "...", BOLD) / 2)
+    dtext(tx, ty, WAIT_TITLE .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
+    dtext(cx, ty + th, (ctx.w and ctx.w.waitSub) or WAIT_SUB, COLORS.muted, SMLSIZE + CENTER)
+
+    -- Gestures: the last summary (while one is kept) and the switch page.
+    local hint = ctx.w and ctx.w.waitHint
+    if hint then
+      drawStickHint(z, { left = hint.review and "Last flight" or nil, right = hint.switches and "Switches" or nil,
+                         hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
+    end
   end
 end
 
@@ -2538,6 +2666,7 @@ local function refresh(ctx, event, touchState)
   background(ctx)   -- background() does not run while the widget is visible
   COLORS = (ctx.options.Theme == 2) and LIGHT or DARK
   NORTH_UP = (ctx.options.Compass == 2)
+  BAR.style = ctx.w and ctx.w.barStyle or "solid"
   U = (ctx.w and ctx.w.imperial) and UNITS.imperial or UNITS.metric
 
   local z = ctx.zone
