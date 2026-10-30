@@ -22,7 +22,7 @@ return function(core)
       { key = "mascot", page = "display", label = "Mascot", type = "choice",
         choices = core.MASCOTS, labels = { "Quad", "Scout" }, default = core.MASCOTS[1],
         hint = "Character on the wait page" },
-      { key = "flightTime", page = "display", label = "Flight time", type = "choice",
+      { key = "flightTime", page = "display", label = "Flight time", shared = true, type = "choice",
         choices = core.FLIGHT_TIMES, labels = { "EdgeTX Timer 1", "Remaining Timer" }, default = core.FLIGHT_TIMES[1],
         hint = "Time shown beside the battery % in flight" },
       { key = "gpsView", page = "display", label = "GPS view", type = "choice",

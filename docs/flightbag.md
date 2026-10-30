@@ -72,12 +72,12 @@ A **warning sign** on an icon means something needs attention: no settings file 
 sensor, or a setup step still open (for example no battery assigned to the active model). The popup names it in
 the warning colour.
 
-The resets ask for confirmation first. **Sounds**, **Vibration** and **Strength** are shared by all projects, so
-no reset changes them.
+The resets ask for confirmation first. **Sounds**, **Vibration**, **Strength** and **Flight time** are shared rows,
+so no reset changes them.
 
 | Project | Button | What it does |
 |---|---|---|
-| Lipo Nanny | **Reset settings** | Thresholds, warning sounds and flight time back to the defaults. Batteries, models and statistics stay. |
+| Lipo Nanny | **Reset settings** | Thresholds and warning sounds back to the defaults. Batteries, models and statistics stay. |
 | Lipo Nanny | **Reset stats** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Profiles and models stay. |
 | Lipo Nanny | **Factory reset** | Erases all batteries, models, statistics and settings. |
 | Link Sentinel | **Reset settings** | All Link Sentinel settings back to the defaults. |
@@ -289,27 +289,38 @@ empties the list.
 
 ## Display
 
-What the widgets show.
+What the widgets show. The shared row on top applies to Flight Wingman and Lipo Nanny at once, then the Flight Wingman block.
 
 <p align="center">
   <img src="img/flightbag-display.png" width="480" alt="Display page">
 </p>
+
+| Row | Notes |
+|---|---|
+| **Flight time** | The small value beside the battery percentage in flight, in Flight Wingman and in the Lipo Nanny widget: `EdgeTX Timer 1` (default, the model's Timer 1, shown as **TIMER**; nothing while Timer 1 is off) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, shown as **TIME LEFT**, `calc..` for the first 30 s of flying). If the two projects were set differently before, the row shows **Mixed** until you choose a value. |
 
 **Flight Wingman**
 
 | Row | Notes |
 |---|---|
 | **Mascot** | The character on the waiting page, `Quad` (default) or `Scout`. |
-| **Flight time** | The small value beside the battery percentage on the flight page: `EdgeTX Timer 1` (default, the model's Timer 1) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, `calc..` for the first 30 s of flying). |
 | **GPS view** | The layout of the flight page, `Compass` (default) or `Horizon` (large artificial horizon from the flight controller's pitch and roll). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds). |
 | **Bar style** | How the battery, link and LQ bars look on the flight and preflight pages: `Solid` (default, one bar with marks at the thresholds), `Segments` (20 blocks, empty blocks in a warning range tinted yellow or red) or `Zones` (a thinner bar with a strip below it showing the warning ranges and a pointer at the current value). |
 | **Switch page** | `On` (default): on the waiting page, hold the aileron stick right for a second to see every switch of the radio with its channel, the flight modes it switches on in Betaflight or INAV (read from the flight controller at each connection and kept per model) and the special functions on each position; hold it left to go back. `Off` hides the page and skips the reading. |
 
-**Lipo Nanny**
+The two mascots on the waiting page:
 
-| Row | Notes |
+| `Quad` | `Scout` |
 |---|---|
-| **Flight time** | `EdgeTX Timer 1` (default) shows **TIMER** with the model's Timer 1 (nothing while Timer 1 is off); `Remaining Timer` shows **TIME LEFT**, the estimated remaining flight time. Applies to the Lipo Nanny widget; Flight Wingman uses its own row above. |
+| <img src="img/mascot-quad.png" width="300" alt="Quad: a green mini quadcopter with big eyes on its camera and a radio antenna"> | <img src="img/mascot-scout.png" width="300" alt="Scout: a green rounded robot head with big eyes, ears and a radio antenna"> |
+
+The three bar styles on the flight page, battery on the left and link on the right:
+
+| Bar style | Flight page |
+|---|---|
+| `Solid` | <img src="img/bar-style-solid.png" width="400" alt="Solid bars: one bar each, red and yellow marks at the battery thresholds, a yellow mark on the link bar"> |
+| `Segments` | <img src="img/bar-style-segments.png" width="400" alt="Segment bars: 20 blocks each, the empty blocks in the link's warning range tinted yellow"> |
+| `Zones` | <img src="img/bar-style-zones.png" width="400" alt="Zone bars: thinner bars with a red and yellow strip below the battery bar, a yellow strip below the link bar and a pointer at each value"> |
 
 ---
 
