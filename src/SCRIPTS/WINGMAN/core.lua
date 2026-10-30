@@ -936,7 +936,8 @@ end
 -- rest far from home after a flight (disarmed far out, or the link lost with
 -- the last position far out) and ends only on the close gesture or on arming.
 local function buildPages(w, on, now, connected)
-  w.flight, w.pre, w.search, w.post, w.waitSub = nil, nil, nil, nil, nil
+  w.flight, w.pre, w.search, w.post = nil, nil, nil, nil
+  w.waitTitle, w.waitSub = nil, nil
   w.waitHold, w.waitHint, w.sw, w.preReady = nil, nil, nil, false
   if w.phase ~= M.WAITING or w.searching then closeSwitches(w) end
   local disarmed = w.lastArmed and not w.armed   -- armed -> disarmed edge
@@ -980,7 +981,11 @@ local function buildPages(w, on, now, connected)
     local core = w.mods.lipo
     if L and core.isActive(L) and not L.selectedProfile and not L.pendingSelection then
       w.phase = M.WAITING   -- no page jump back: wait until the battery core knows
-      w.waitSub = core.isUsbConnected(L) and "USB connected" or "Calculating..."
+      if core.isUsbConnected(L) then
+        w.waitTitle, w.waitSub = "MODEL ON USB", "Connect a battery"
+      else
+        w.waitTitle, w.waitSub = "CHECKING BATTERY", "Calculating..."
+      end
     else
       w.pre = preView(w, on, now)
       w.preStatus = M.preflightStatus(w.pre, w.mods)

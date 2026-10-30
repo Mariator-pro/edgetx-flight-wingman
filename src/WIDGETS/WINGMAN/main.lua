@@ -2452,8 +2452,9 @@ do
 
     -- Title with dots counting up; left edge fixed so the text does not jump.
     local ty = my + math.floor(122 * k + 0.5) + gap
-    local tx = cx - math.floor(textW(WAIT_TITLE .. "...", BOLD) / 2)
-    dtext(tx, ty, WAIT_TITLE .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
+    local title = (ctx.w and ctx.w.waitTitle) or WAIT_TITLE
+    local tx = cx - math.floor(textW(title .. "...", BOLD) / 2)
+    dtext(tx, ty, title .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
     dtext(cx, ty + th, (ctx.w and ctx.w.waitSub) or WAIT_SUB, COLORS.muted, SMLSIZE + CENTER)
 
     -- Gestures: the last summary (while one is kept) and the switch page.
