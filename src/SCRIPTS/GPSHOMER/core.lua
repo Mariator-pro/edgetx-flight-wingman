@@ -941,9 +941,13 @@ end
 -- One CRSF frame, popped by the caller (the caller drains the queue once per
 -- cycle so other consumers in the same script get the frames too): MSP replies
 -- and ArduPilot passthrough HDOP. Taken on the ground before the first flight
--- (as of the last tick) and while a reply is still due after arming.
+-- (as of the last tick) and while a reply is still due after arming. Any
+-- passthrough frame tells ArduPilot for the pitch sign, at any time.
 function M.handleFrame(state, cmd, data, now)
   local P = M.PARAMS
+  -- Only ArduPilot (or the ELRS module in MAVLink mode) sends these; also in
+  -- flight, where an ambiguous FM text (ALTH, no "*") cannot tell after a dropout.
+  if cmd == 0x80 or cmd == 0x7F then state.attFc = "AP" end
   if not state.useMsp then return end
   now = now or nowMs()
   local late = state.dopWaiting and now - state.dopSentAt < P.DOP_STALE_T * 1000
@@ -1042,7 +1046,8 @@ function M.readSnapshot(state, now)
   local armed, armedKnown = armedFromFM(state, fm)
 
   -- Pitch nose up positive. Betaflight and INAV send nose down positive, ArduPilot
-  -- nose up; the firmware from the first FM text that tells, unknown counts as Betaflight.
+  -- nose up; the firmware from a passthrough frame or the first FM text that
+  -- tells, unknown counts as Betaflight.
   if pitch then
     state.attFc = state.attFc or state.fcKind or M.fcFromFM(fm)
     if state.attFc ~= "AP" then pitch = -pitch end
