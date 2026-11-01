@@ -234,7 +234,7 @@ configured yet, **[+] Add current model** appears in the bottom bar.
 | **Batteries** | Opens the list where you tick the profiles that fit this model. Profiles with the wrong cell count (and, in parallel mode, those with fewer than two packs) are greyed out. |
 | **Sensors** | `default` or `custom`. Opens the sensor mapping (see below). |
 | **Show in Wingman** | Only with Flight Wingman. Opens the module switches (see below). |
-| **SD logs** | `Off`, or the trigger and interval of the model's log function (for example `SF↓, 0.5 s`, with `, disabled` when it is switched off in the model). Opens the SD logs page (see below). Only for the active model. |
+| **SD logs** | `Off`, or the trigger and interval of the model's log function (for example `SF↓, 0.5 s`, with `, disabled` when it is switched off in the model), or `No trigger` for an SD Logs function without a switch. Opens the SD logs page (see below). Only for the active model. |
 
 Buttons: **Back**, **Save** and **Delete** (existing model settings only).
 
@@ -274,27 +274,33 @@ stops that project's announcements on this model.
 
 ### SD logs
 
+<p align="center">
+  <img src="img/flightbag-sd-logs.png" width="480" alt="SD logs page">
+</p>
+
 EdgeTX writes telemetry to the SD card (`/LOGS/`) only while the model has the special function **SD Logs**. This
 page sets it up in the active model, so every flight can be viewed later on a computer (for example with EdgeTX
 Wingman Viewer).
 
 | Field | Notes |
 |---|---|
-| **Trigger** | The arm switch (one log file per flight), any defined logical switch, or `Always on` (logs from power-on to power-off). Choose the switch position that arms the model. |
+| **Log** | `Armed` (one log file per flight, while the arm switch is on) or `Always on` (logs from power-on to power-off). |
+| **Arm switch** | Only with `Armed`. The switch position that arms the model, or any defined logical switch. A switch set in EdgeTX that the list does not offer (for example an inverted switch or a flight mode) heads the list, so Enter keeps it. |
 | **Interval** | Time between two log lines, 0.1 to 5.0 s, default 0.5 s (about 4 MB per hour of flying). A longer interval set by hand in the model stays until you change it. |
 
 **Set up** adds the function to a free special function slot, **Apply** changes an existing one, **Remove** deletes
 it. Unlike the model's **Save**, these change the model on the radio right away; EdgeTX stores it after a few
 seconds. Any SD Logs function in the model counts, also one set up by hand. If it is switched off in the model's
-special functions, the row ends in `disabled` and **Apply** switches it on again. **Set up** only takes an unused slot,
-not a special function that has no switch yet.
+special functions, the row ends in `disabled` and **Apply** switches it on again. An SD Logs function without a
+switch never logs; the page shows `No trigger in the model`, and **Apply** gives that function the chosen arm switch
+or `Always on` instead of adding a second one. **Set up** only takes an unused slot.
 
 Lipo Nanny, Link Sentinel and GPS Homer add their warnings to the log as telemetry sensors (`LNst`, `LNpk`,
 `LSst`, `GHst`). EdgeTX only adds a new sensor while **Discover new sensors** runs on the model's telemetry page. As
 long as one is missing, this page shows `Log sensors: 2 of 4 found` (counting the installed projects that are
-switched on for the model), and Flight Wingman shows the same line on its preflight page. Open **Model > Telemetry**,
-press **Discover new sensors** while Flight Wingman (or the project's widget) runs with a linked model, then stop
-the search.
+switched on for the model and new enough to write log sensors), and Flight Wingman shows the same line on its
+preflight page. Open **Model > Telemetry**, press **Discover new sensors** while Flight Wingman (or the project's
+widget) runs with a linked model, then stop the search.
 
 ---
 
