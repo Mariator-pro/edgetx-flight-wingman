@@ -1903,7 +1903,7 @@ do
   end
 
   -- Ready field left; right of it the versions on top and below the line
-  -- (arming blocked in yellow), both to the right edge. While the countdown runs
+  -- (arming blocked or missing log sensors in yellow), both to the right edge. While the countdown runs
   -- (GO, "All modules ready") the line stops short of it.
   local function drawReady(L, z, top, p, st, counting)
     local bw, bh = L.x(READY_W), L.s(READY_H)
@@ -1923,7 +1923,7 @@ do
     if st.line then
       if counting then tw = tw - countdownW(L, "Flight page") - L.x(18) end
       btext(tx, by + bh - L.s(8), cutText(st.line, "", tw, L.f.value),
-            p.armBlocked and WARN_COL or COLORS.fg, L.f.value)
+            (p.armBlocked or st.lineWarn) and WARN_COL or COLORS.fg, L.f.value)
     end
   end
 

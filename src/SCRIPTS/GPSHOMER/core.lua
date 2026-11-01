@@ -32,7 +32,7 @@ local M = {}
 -- Single source of the version: the settings tool reads VERSION, API and
 -- CONFIG_PATH as text from the head of this file (keep them near the top).
 M.VERSION = "1.0.0"
-M.API     = { 1, 0 }
+M.API     = { 1, 1 }
 M.CONFIG_PATH = "/SCRIPTS/GPSHOMER/config.lua"
 -- API is the interface version for scripts that load this core: { breaking, additive }.
 -- Adding an exported function or field bumps the second number; changing or
@@ -1564,6 +1564,31 @@ local function holdLive(state, result, up)
   return held
 end
 
+-- Telemetry sensor for the flight log: EdgeTX writes it into every log row, so a
+-- log viewer sees why the radio warned. ID 0x4748 is "GH" in ASCII. EdgeTX adds a
+-- new sensor only while "Discover new sensors" runs.
+local LOG_SENSOR_ID = 0x4748
+M.LOG_SENSORS = { "GHst" }
+
+-- Reason of the current warning: 3 GPS fix lost, 2 over the max distance,
+-- 1 over the max altitude, 0 none (the first that applies); -1 when there is
+-- nothing to judge (no telemetry, a GPS sensor missing, no stable fix yet).
+function M.logReason(r)
+  if r.sensorMissing or r.gpsState == "ACQUIRING" or (r.linkUp == false and not r.held) then
+    return -1
+  end
+  if r.fixLost then return 3 end
+  if r.distOver then return 2 end
+  if r.altOver then return 1 end
+  return 0
+end
+
+-- GHst: the reason of the current warning (logReason).
+function M.writeLogSensors(result)
+  if not setTelemetryValue then return end
+  setTelemetryValue(LOG_SENSOR_ID, 0, 0, M.logReason(result), 0, 0, "GHst")
+end
+
 function M.update(state, now)
   now = now or nowMs()
   M.pollConfig(now)
@@ -1580,7 +1605,9 @@ function M.update(state, now)
   if result.altEvent     then announce("alt"); wakeDisplay() end
   if result.distEvent    then announce("dist"); wakeDisplay() end
 
-  return holdLive(state, result, snap.telem)
+  local out = holdLive(state, result, snap.telem)
+  M.writeLogSensors(out)
+  return out
 end
 
 return M

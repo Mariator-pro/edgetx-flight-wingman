@@ -11,7 +11,7 @@ local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
 M.VERSION = "1.0.0"
-M.API     = { 1, 0 }
+M.API     = { 1, 1 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
 -- Must be false on the radio: it replaces link, mode and the page values.
@@ -545,6 +545,8 @@ end
 -- warning, 2 critical), DOP stage, ready field "GO" / "CHECK" and the line next
 -- to it. p = { batt, gps, link, armBlocked, armReason }; a module that is off is
 -- nil and does not count. batt.packs set = selection open (no status line).
+-- p.logHint (log sensors missing) takes the line unless arming is blocked; it
+-- does not change GO / CHECK. s.lineWarn: the line is a warning.
 -- The checks come from the cores (mods = w.mods: preflight of each, lqLevel of
 -- the link core for the LQ value).
 function M.preflightStatus(p, mods)
@@ -570,6 +572,9 @@ function M.preflightStatus(p, mods)
   s.ready = check and "CHECK" or "GO"
   if p.armBlocked then
     s.line = p.armReason and ("Arming blocked: " .. p.armReason) or "Arming blocked"
+    s.lineWarn = true
+  elseif p.logHint then
+    s.line, s.lineWarn = p.logHint, true
   elseif not check then
     s.line = "All modules ready"
   end
@@ -684,8 +689,43 @@ local function linkView(w, r)
            lqCrit = w.mods.link.PARAMS.RQLY_THRESHOLD }  -- stage 2 mark on the preflight LQ bar
 end
 
+-- True when the model has an "SD Logs" special function (EdgeTX type 18).
+local FUNC_LOGS = 18
+local function hasLogs()
+  if not (model and model.getCustomFunction) then return false end
+  for i = 0, 63 do
+    local ok, cf = pcall(model.getCustomFunction, i)
+    if ok and type(cf) == "table" and cf.func == FUNC_LOGS and (cf.switch or 0) ~= 0 then return true end
+  end
+  return false
+end
+
+-- Log sensors of the switched-on cores (their LOG_SENSORS) while the model logs
+-- to the SD card: found, total; nil without an SD Logs function. EdgeTX adds a
+-- core's sensor only while "Discover new sensors" runs. Checked once a second.
+function M.logSensors(w, on, now)
+  if w.logsAt and now - w.logsAt < 100 then return w.logsFound, w.logsTotal end
+  w.logsAt, w.logsFound, w.logsTotal = now, nil, nil
+  if not hasLogs() then return nil end
+  local found, total = 0, 0
+  for _, k in ipairs(M.MODULES) do
+    local mod = w.mods[k]
+    if on[k] and mod and type(mod.LOG_SENSORS) == "table" then
+      for _, n in ipairs(mod.LOG_SENSORS) do
+        total = total + 1
+        local ok, info = pcall(getFieldInfo, n)
+        if ok and info then found = found + 1 end
+      end
+    end
+  end
+  w.logsFound, w.logsTotal = found, total
+  return found, total
+end
+
 local function preView(w, on, now)
   local p = { armBlocked = w.armBlocked, armReason = w.armReason, fcInfo = w.fcInfo }
+  local found, total = M.logSensors(w, on, now)
+  if found and found < total then p.logHint = "Log sensors: " .. found .. " of " .. total .. " found" end
   if lipoOn(w, on) then p.batt = preBattery(w, now) end
   local g, r = gpsRes(w, on), linkRes(w, on)
   if g then p.gps = preGps(w, g) end
