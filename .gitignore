@@ -39,6 +39,7 @@ secrets.json
 # Edgetx simulator
 src/MODELS
 src/RADIO
+src/LOGS
 
 # Runtime data
 config.lua
