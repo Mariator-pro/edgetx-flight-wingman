@@ -31,7 +31,7 @@
 local M = {}
 -- Single source of the version: the settings tool reads VERSION, API and
 -- CONFIG_PATH as text from the head of this file (keep them near the top).
-M.VERSION = "1.0.0"
+M.VERSION = "1.1.0"
 M.API     = { 1, 1 }
 M.CONFIG_PATH = "/SCRIPTS/GPSHOMER/config.lua"
 -- API is the interface version for scripts that load this core: { breaking, additive }.
