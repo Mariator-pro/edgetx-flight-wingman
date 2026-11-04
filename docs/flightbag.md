@@ -229,14 +229,27 @@ configured yet, **[+] Add current model** appears in the bottom bar.
 
 | Field | Notes |
 |---|---|
+| **Battery** | Only with Lipo Nanny. Cell count and number of assigned profiles, for example `6S, 1 battery`. Opens the battery page (see below). |
+| **Show in Wingman** | Only with Flight Wingman. Opens the module switches (see below). |
+| **SD logs** | `Off`, or the trigger and interval of the model's log function (for example `SF↓, 0.5 s`, with `, disabled` when it is switched off in the model), or `No trigger` for an SD Logs function without a switch. Opens the SD logs page (see below). Only for the active model. |
+
+Buttons: **Back**, **Save** and **Delete** (existing model settings only). **Save** also stores what you changed on the
+battery page and in **Show in Wingman**; **SD logs** changes the model right away.
+
+### Battery
+
+<p align="center">
+  <img src="img/flightbag-model-battery.png" width="480" alt="Battery page of a model">
+</p>
+
+| Field | Notes |
+|---|---|
 | **Cells** | The model's cell count (S). Only profiles with the same cell count can be assigned. |
 | **Parallel packs** | `Yes` if you fly two packs in parallel (shown as `#1+2`), otherwise `No`. Needs at least one assigned profile with **two or more packs**. Switching to `Yes` with single-pack profiles assigned asks to unassign them. At flight time the second pack is always from the same profile as the first. |
 | **Batteries** | Opens the list where you tick the profiles that fit this model. Profiles with the wrong cell count (and, in parallel mode, those with fewer than two packs) are greyed out. |
 | **Sensors** | `default` or `custom`. Opens the sensor mapping (see below). |
-| **Show in Wingman** | Only with Flight Wingman. Opens the module switches (see below). |
-| **SD logs** | `Off`, or the trigger and interval of the model's log function (for example `SF↓, 0.5 s`, with `, disabled` when it is switched off in the model), or `No trigger` for an SD Logs function without a switch. Opens the SD logs page (see below). Only for the active model. |
 
-Buttons: **Back**, **Save** and **Delete** (existing model settings only).
+**Back** returns to the model; the changes are stored with the model's **Save**.
 
 ### Sensors
 
@@ -285,7 +298,7 @@ Wingman Viewer).
 | Field | Notes |
 |---|---|
 | **Log** | `Armed` (one log file per flight, while the arm switch is on) or `Always on` (logs from power-on to power-off). |
-| **Arm switch** | Only with `Armed`. The switch position that arms the model, or any defined logical switch. A switch set in EdgeTX that the list does not offer (for example an inverted switch or a flight mode) heads the list, so Enter keeps it. |
+| **Arm switch** | Only with `Armed`. The switch position that arms the model, or any defined logical switch. A switch set in EdgeTX that the list does not offer (for example an inverted switch or a flight mode) heads the list, so Enter keeps it. While the model has no switch set, Flight Wingman's stored FC modes preselect the position that arms the model, if exactly one does; it is written only with **Set up** or **Apply**. |
 | **Interval** | Time between two log lines, 0.1 to 5.0 s, default 0.5 s (about 4 MB per hour of flying). A longer interval set by hand in the model stays until you change it. |
 
 **Set up** adds the function to a free special function slot, **Apply** changes an existing one, **Remove** deletes

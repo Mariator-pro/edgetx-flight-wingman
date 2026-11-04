@@ -286,7 +286,35 @@ local function modesAt(ranges, aux, v)
   return table.concat(t, ", ")
 end
 
-local MONTHS = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
+-- µs the FC sees for a switch position on a simple mix (c from channelOf).
+local function positionUs(c, p)
+  local s = c.simple
+  return us(M.outPct(c.out, (p.s * s[3] / 100 + s[4]) * s[1] / 100 + s[2]))
+end
+
+-- Position index of the one switch position that arms the model according to
+-- the FC's ranges; nil when none or several do (simple mixes only).
+function M.armPosition(ranges)
+  local arm = {}
+  for _, r in ipairs(ranges) do
+    if r.name == "ARM" then arm[#arm + 1] = r end
+  end
+  local lines, found = M.mixLines(), nil
+  for _, sw in ipairs(M.scan()) do
+    local c = M.channelOf(sw, lines)
+    if c and c.simple and c.ch >= 5 then
+      for _, p in ipairs(sw.pos) do
+        if modesAt(arm, c.ch - 4, positionUs(c, p)) ~= "" then
+          if found then return nil end
+          found = p.idx
+        end
+      end
+    end
+  end
+  return found
+end
+
+local MONTHS ={ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }
 -- "2026-10-15" as "15 Oct".
 local function dayText(d)
   local y, m, day = string.match(d or "", "^(%d+)-(%d+)-(%d+)$")
@@ -350,8 +378,7 @@ function M.view(static, modes, old)
             if cur and type(live) == "number" then
               m = modesAt(ranges, aux, 1500 + live / 2)   -- ±1024 = ±512 µs
             elseif c.simple then
-              local s = c.simple
-              m = modesAt(ranges, aux, us(M.outPct(c.out, (p.s * s[3] / 100 + s[4]) * s[1] / 100 + s[2])))
+              m = modesAt(ranges, aux, positionUs(c, p))
             end
           end
           card.pos[#card.pos + 1] = { sym = p.sym, modes = (m ~= "") and m or nil, sf = p.sf, play = p.play, cur = cur }
