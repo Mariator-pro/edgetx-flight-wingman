@@ -319,14 +319,16 @@ widget) runs with a linked model, then stop the search.
 
 ## Last flights
 
-GPS Homer only. Where the model was when the telemetry ended, for the last three flights.
+GPS Homer only. The last GPS position the radio received before the telemetry ended, for the last three flights.
+After a normal landing this is usually the landing spot. After a crash or a lost link it is only the last known
+spot, so the model can be further away.
 
 <p align="center">
   <img src="img/flightbag-flights.png" width="480" alt="Last flights page">
 </p>
 
-Each entry shows date, time, model name and coordinates, plus a **QR code**: scan it with a phone and the map app
-opens on that spot. The wheel steps through the flights (older / newer). **Clear flights** in the GPS Homer popup
+Each entry shows the date and time the telemetry ended, the model name and the coordinates under `LAST POSITION`,
+plus a **QR code**: scan it with a phone and the map app opens on that spot. The wheel steps through the flights (older / newer). **Clear flights** in the GPS Homer popup
 empties the list.
 
 ---
