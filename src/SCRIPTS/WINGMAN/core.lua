@@ -184,17 +184,22 @@ function M.armBlockedFM(fm)
 end
 
 -- ---------------------------------------------------------------------------
--- MSP over CRSF: FC info once per link (firmware, version, board) and, while
--- arming is blocked, the reasons. One request at a time, never while the GPS
--- core waits for its own reply; only disarmed. Each request makes ELRS switch
--- telemetry to 1:2 for a few seconds.
+-- MSP over CRSF: FC info once per link (firmware, version, board), the failsafe
+-- settings once per link with the GPS module on and, while arming is blocked,
+-- the reasons. One request at a time, never while the GPS core waits for its own
+-- reply; only disarmed. Each request makes ELRS switch telemetry to 1:2 for a
+-- few seconds.
 -- ---------------------------------------------------------------------------
 local MSP_REQ, MSP_RESP   = 0x7A, 0x7B
 local ADDR_FC, ADDR_RADIO = 0xC8, 0xEA
 M.MSP_FC_VARIANT, M.MSP_FC_VERSION, M.MSP_BOARD_INFO = 2, 3, 4
 M.MSP_STATUS_EX, M.MSP2_INAV_STATUS = 150, 0x2000
 M.MSP_MODE_RANGES, M.MSP_BOXNAMES, M.MSP_BOXIDS = 34, 116, 119   -- switch page
+M.MSP_FAILSAFE_CONFIG, M.MSP_GPS_RESCUE = 75, 135   -- preflight: failsafe procedure, Rescue's minimum sats
 local BOX_PAGE = 32   -- Betaflight sends names and ids in pages of 32 modes
+local FLY_HOME = 2    -- failsafe procedure: Betaflight GPS Rescue, INAV RTH
+local FS_NAMES = { BTFL = { [0] = "land", [1] = "drop" },
+                   INAV = { [0] = "land", [1] = "drop", [3] = "none" } }
 local MSP_TIMEOUT  = 100   -- getTime units: 1 s for a reply
 local MSP_GIVE_UP_T = 1000 -- no reply at all 10 s after the FC's first FM text: give up (ArduPilot never answers)
 local REASON_EVERY = 200   -- 2 s between arming status polls
@@ -312,6 +317,13 @@ function M.armingReasons(cmd, p)
   return table.concat(names, ", ")
 end
 
+-- What the failsafe does when it does not fly home ("drop", ...); nil when it
+-- does, or when the procedure is unknown.
+function M.failsafeName(variant, procedure)
+  local names = FS_NAMES[variant]
+  return names and names[procedure]
+end
+
 -- Modes for the switch page from MSP_MODE_RANGES (4 bytes per slot: permanent
 -- mode id, AUX index from 0, start and end step; step x 25 + 900 us, start =
 -- end is an empty slot) and the names: per page the MSP_BOXIDS bytes and the
@@ -351,6 +363,8 @@ mspFrame = function(w, cmd, data)
   if rcmd == M.MSP_MODE_RANGES then md.ranges = p; return true end
   if rcmd == M.MSP_BOXIDS then md.ids[md.page] = p; return true end
   if rcmd == M.MSP_BOXNAMES then md.names[md.page] = ascii(p, 1, #p); return true end
+  if rcmd == M.MSP_FAILSAFE_CONFIG then m.fsProc, m.fsDone, m.rescueLost = p[8], true, 0; return true end
+  if rcmd == M.MSP_GPS_RESCUE then m.rescueMin, m.rescueDone, m.rescueLost = p[16], true, 0; return true end
   if rcmd == M.MSP_FC_VARIANT then
     m.variant = ascii(p, 1, 4)
   elseif rcmd == M.MSP_FC_VERSION then
@@ -433,13 +447,25 @@ local function modesRequest(m)
 end
 local MODES_CMD = { [M.MSP_MODE_RANGES] = true, [M.MSP_BOXIDS] = true, [M.MSP_BOXNAMES] = true }
 local MODES_TRIES = 3   -- mode requests lost in a row before the read gives up for this link
+local RESCUE_CMD = { [M.MSP_FAILSAFE_CONFIG] = true, [M.MSP_GPS_RESCUE] = true }
+local RESCUE_TRIES = 3  -- failsafe requests lost in a row before the check gives up for this link
+
+-- Next request of the failsafe check, nil when done. Rescue's minimum only from
+-- Betaflight with Rescue as the procedure (a build without Rescue answers an error).
+local function rescueRequest(m)
+  if m.variant ~= "BTFL" and m.variant ~= "INAV" then return nil end
+  if not m.fsDone then return M.MSP_FAILSAFE_CONFIG end
+  if m.variant == "BTFL" and m.fsProc == FLY_HOME and not m.rescueDone then return M.MSP_GPS_RESCUE end
+  return nil
+end
 
 -- One MSP step per tick: drop a request after its timeout, then send the next
 -- when the CRSF module takes one. Asks only after the FC's first FM text (a
 -- receiver without FC is never asked); without any reply 10 s later it gives up
 -- until the next link; with the switch page on and an ArduPilot FM text it
--- stores that the modes cannot be read. Results: w.fcInfo, w.armReason, the stored modes (switch page on).
-local function pollMsp(w, now, armed)
+-- stores that the modes cannot be read. Results: w.fcInfo, w.armReason, the
+-- failsafe settings in w.msp, the stored modes (switch page on).
+local function pollMsp(w, now, armed, on)
   if not w.linkUp or armed or not crossfireTelemetryPush then return end
   w.msp = w.msp or { seq = 0 }
   local m = w.msp
@@ -450,6 +476,10 @@ local function pollMsp(w, now, armed)
     if MODES_CMD[m.waiting] then
       m.modeLost = (m.modeLost or 0) + 1
       if m.modeLost >= MODES_TRIES then m.modesDone, m.modes = true, nil end
+    end
+    if RESCUE_CMD[m.waiting] then
+      m.rescueLost = (m.rescueLost or 0) + 1
+      if m.rescueLost >= RESCUE_TRIES then m.fsDone, m.rescueDone = true, true end
     end
     m.waiting = nil
   end
@@ -473,6 +503,7 @@ local function pollMsp(w, now, armed)
   if not m.variant then cmd = M.MSP_FC_VARIANT
   elseif not m.version then cmd = M.MSP_FC_VERSION
   elseif not m.board then cmd = M.MSP_BOARD_INFO
+  elseif on.gps ~= false and w.mods.gps and rescueRequest(m) then cmd = rescueRequest(m)
   elseif w.armBlocked and (not m.reasonAt or now - m.reasonAt >= REASON_EVERY) then
     if m.variant == "BTFL" then cmd = M.MSP_STATUS_EX elseif m.variant == "INAV" then cmd = M.MSP2_INAV_STATUS end
   end
@@ -504,7 +535,7 @@ end
 -- Armed works without any sibling core (own armedFromFM). The phase comes from
 -- flightPhase on its own state w.fs (w.phase is the page and may be overridden
 -- below: calculating, setup error); w.preReady is the last tick's GO.
-local function updatePhase(w, now)
+local function updatePhase(w, now, on)
   local up = linkUp()
   w.linkUp = up   -- packets arriving right now (no grace), e.g. for a heartbeat
   w.rssi = getRSSI()   -- 0..99, meaning differs per radio system (CRSF: LQ %, FrSky: dB)
@@ -519,7 +550,7 @@ local function updatePhase(w, now)
     w.armBlocked = not armed and M.armBlockedFM(fm)
     local fcFromFM = w.mods.gps and w.mods.gps.fcFromFM
     w.fcGuess = (fcFromFM and fcFromFM(fm)) or w.fcGuess   -- firmware from the FM text (switch page)
-    pollMsp(w, now, armed)
+    pollMsp(w, now, armed, on)
     w.fcInfo = fcInfoText(w.msp)
     w.armReason = w.armBlocked and w.msp and w.msp.reason or nil
   end
@@ -545,14 +576,21 @@ end
 -- warning, 2 critical), DOP stage, ready field "GO" / "CHECK" and the line next
 -- to it. p = { batt, gps, link, armBlocked, armReason }; a module that is off is
 -- nil and does not count. batt.packs set = selection open (no status line).
--- p.logHint (log sensors missing) takes the line unless arming is blocked; it
--- does not change GO / CHECK. s.lineWarn: the line is a warning.
+-- p.rescueMin: satellites GPS Rescue asks for; fewer give CHECK and the numbers
+-- in the line. p.failsafe (the failsafe does not fly home) and then p.logHint
+-- (log sensors missing) take the line when nothing above does; they do not
+-- change GO / CHECK. s.lineWarn: the line is a warning.
 -- The checks come from the cores (mods = w.mods: preflight of each, lqLevel of
 -- the link core for the LQ value).
 function M.preflightStatus(p, mods)
   mods = mods or {}
   local s, check = {}, p.armBlocked or false
   local b, g, l = p.batt, p.gps, p.link
+  local sats
+  if g and p.rescueMin and g.sats and g.sats < p.rescueMin then
+    sats = string.format("%d of %d sats", math.floor(g.sats), p.rescueMin)
+    check = true
+  end
   if b and b.packs then
     check = true
   elseif b and mods.lipo then
@@ -571,8 +609,14 @@ function M.preflightStatus(p, mods)
   end
   s.ready = check and "CHECK" or "GO"
   if p.armBlocked then
-    s.line = p.armReason and ("Arming blocked: " .. p.armReason) or "Arming blocked"
+    local reason = p.armReason
+    if reason and sats then reason = string.gsub(reason, "%f[%w_]GPS%f[^%w_]", "GPS " .. sats) end
+    s.line = reason and ("Arming blocked: " .. reason) or "Arming blocked"
     s.lineWarn = true
+  elseif sats then
+    s.line, s.lineWarn = "GPS Rescue: " .. sats, true
+  elseif p.failsafe then
+    s.line, s.lineWarn = "Failsafe: " .. p.failsafe, true
   elseif p.logHint then
     s.line, s.lineWarn = p.logHint, true
   elseif not check then
@@ -728,7 +772,11 @@ local function preView(w, on, now)
   if found and found < total then p.logHint = "Log sensors: " .. found .. " of " .. total .. " found" end
   if lipoOn(w, on) then p.batt = preBattery(w, now) end
   local g, r = gpsRes(w, on), linkRes(w, on)
-  if g then p.gps = preGps(w, g) end
+  if g then
+    p.gps = preGps(w, g)
+    local m = w.msp
+    if m then p.failsafe, p.rescueMin = M.failsafeName(m.variant, m.fsProc), m.rescueMin end
+  end
   if r and r.status == "running" then p.link = linkView(w, r) end
   return p
 end
@@ -1374,7 +1422,7 @@ function M.tick(w, on)
   if not w.demo then pcall(readStick, w, now) end
 
   pcall(pollFrames, w, on)
-  pcall(updatePhase, w, now)
+  pcall(updatePhase, w, now, on)
   if not pcall(readTimer, w) then w.timerS = nil end
 
   -- With demo data the cores rest (no announcements from the simulator's sensors).

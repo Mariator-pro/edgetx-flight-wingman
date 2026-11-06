@@ -1903,8 +1903,8 @@ do
   end
 
   -- Ready field left; right of it the versions on top and below the line
-  -- (arming blocked or missing log sensors in yellow), both to the right edge. While the countdown runs
-  -- (GO, "All modules ready") the line stops short of it.
+  -- (warnings in yellow), both to the right edge. While the countdown runs (GO)
+  -- the line stops short of it.
   local function drawReady(L, z, top, p, st, counting)
     local bw, bh = L.x(READY_W), L.s(READY_H)
     local bx, by = L.x(18), top + math.floor((z.h - top - bh) / 2)

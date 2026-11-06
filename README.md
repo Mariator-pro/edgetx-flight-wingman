@@ -55,8 +55,8 @@ Three widgets side by side share a small screen, yet each phase of a flight need
 
 - **One screen, three columns:** battery from Lipo Nanny, home arrow from GPS Homer, link from Link Sentinel, each with the same colors and thresholds as the single widget.
 - **Pages switch on their own**, no button needed: waiting, preflight, flight, post-flight and search.
-- **All warnings stay as they are:** the voice announcements and vibration of the three projects keep running, even when the widget is not on screen. Flight Wingman adds no warnings of its own.
-- **One ready check before take-off:** `GO` when battery, link and GPS are fine and the flight controller allows arming, otherwise `CHECK` with the reason (Betaflight and INAV name the arming block in plain text).
+- **All warnings stay as they are:** the voice announcements and vibration of the three projects keep running, even when the widget is not on screen. Flight Wingman adds no voice or vibration warnings of its own.
+- **One ready check before take-off:** `GO` when battery, link and GPS are fine and the flight controller allows arming, otherwise `CHECK` with the reason (Betaflight from 2025.12 and INAV name the arming block in plain text). With GPS, it also tells you when the failsafe would not fly the model home (`Failsafe: drop`) or when Betaflight's GPS Rescue still needs more satellites (`GPS Rescue: 6 of 8 sats`).
 - **Setup errors show up before you fly:** a missing core, an unconfigured model or a missing sensor keeps the waiting page with a hint, instead of warnings silently not playing.
 - **See what each switch does:** on the waiting page, aileron held right opens a page with every switch, its channel, the flight controller's modes and the sounds for each position (can be turned off in Flight Bag under Display).
 - **Not every model has GPS:** battery, link and GPS can be switched off per model; the remaining columns share the width.
