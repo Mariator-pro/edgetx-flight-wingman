@@ -78,7 +78,7 @@ so no reset changes them.
 | Project | Button | What it does |
 |---|---|---|
 | Lipo Nanny | **Reset settings** | Thresholds and warning sounds back to the defaults. Batteries, models and statistics stay. |
-| Lipo Nanny | **Reset stats** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Profiles and models stay. |
+| Lipo Nanny | **Reset statistics** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Profiles and models stay. |
 | Lipo Nanny | **Factory reset** | Erases all batteries, models, statistics and settings. |
 | Link Sentinel | **Reset settings** | All Link Sentinel settings back to the defaults. |
 | GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. Last flights stay. |
@@ -214,7 +214,7 @@ A read-only table, one row per pack, that the widget fills in as you fly:
 | **Vmin** | The lowest cell voltage ever seen under load, `-` if never flown. |
 | **Last used** | Date of the most recent flight (`YYYY-MM-DD`), or `-`. |
 
-**Reset stats** in the Lipo Nanny popup clears them (together with the cycle counts).
+**Reset statistics** in the Lipo Nanny popup clears them (together with the cycle counts).
 
 ---
 
