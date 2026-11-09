@@ -57,12 +57,13 @@ return function(core)
       dist  = { label = "Max distance", hint = "Farther than Max distance from home" },
     },
 
+    -- id never changes once released: other programs recognise a reset by it, not by its label
     resets = {
-      { label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? The flight list stays.",
+      { id = "settings", label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? The flight list stays.",
         run = core.resetSettings },
-      { label = "Clear flights", ask = "Clear the list of last landing spots?",
+      { id = "flights",  label = "Clear flights", ask = "Clear the list of last landing spots?",
         run = core.clearFlights },
-      { label = "Factory reset", ask = "Reset GPS Homer settings and clear the flight list?",
+      { id = "factory",  label = "Factory reset", ask = "Reset GPS Homer settings and clear the flight list?",
         run = core.factoryReset },
     },
   }
