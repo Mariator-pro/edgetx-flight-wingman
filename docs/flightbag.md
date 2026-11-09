@@ -81,8 +81,8 @@ so no reset changes them.
 | Lipo Nanny | **Reset stats** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Profiles and models stay. |
 | Lipo Nanny | **Factory reset** | Erases all batteries, models, statistics and settings. |
 | Link Sentinel | **Reset settings** | All Link Sentinel settings back to the defaults. |
-| GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. The flight list stays. |
-| GPS Homer | **Clear flights** | Empties the list on the Last flights page. |
+| GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. Last flights stay. |
+| GPS Homer | **Clear last flights** | Empties the list on the Last flights page. Settings stay. |
 | GPS Homer | **Factory reset** | Both of the above. |
 
 Flight Wingman has no resets of its own (its popup shows **Files** and **Close**).
@@ -328,7 +328,7 @@ spot, so the model can be further away.
 </p>
 
 Each entry shows the date and time the telemetry ended, the model name and the coordinates under `LAST POSITION`,
-plus a **QR code**: scan it with a phone and the map app opens on that spot. The wheel steps through the flights (older / newer). **Clear flights** in the GPS Homer popup
+plus a **QR code**: scan it with a phone and the map app opens on that spot. The wheel steps through the flights (older / newer). **Clear last flights** in the GPS Homer popup
 empties the list.
 
 ---

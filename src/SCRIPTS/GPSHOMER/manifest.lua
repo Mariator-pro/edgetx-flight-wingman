@@ -59,11 +59,11 @@ return function(core)
 
     -- id never changes once released: other programs recognise a reset by it, not by its label
     resets = {
-      { id = "settings", label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? The flight list stays.",
+      { id = "settings", label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? Last flights stay.",
         run = core.resetSettings },
-      { id = "flights",  label = "Clear flights", ask = "Clear the list of last landing spots?",
+      { id = "flights",  label = "Clear last flights", ask = "Clear the last flights list? Settings stay.",
         run = core.clearFlights },
-      { id = "factory",  label = "Factory reset", ask = "Reset GPS Homer settings and clear the flight list?",
+      { id = "factory",  label = "Factory reset", ask = "Reset GPS Homer settings and clear the last flights list?",
         run = core.factoryReset },
     },
   }
