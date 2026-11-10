@@ -11,7 +11,7 @@ local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
 M.VERSION = "1.1.0"
-M.API     = { 1, 1 }
+M.API     = { 1, 2 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
 -- Must be false on the radio: it replaces link, mode and the page values.
@@ -1348,6 +1348,24 @@ function M.setModules(cfg, filename, on)
     if on[k] == false then m = m or {}; m[k] = false end
   end
   cfg.models[filename] = m
+end
+
+-- Resets of the settings tool. The shared flight time stays in both.
+-- Display settings back to the defaults; module switches and FC modes stay.
+-- False without a readable config, so a damaged file is never overwritten.
+function M.resetSettings()
+  local cfg = M.loadConfig()
+  if not cfg then return false end
+  local d = M.defaultConfig()
+  cfg.mascot, cfg.gpsView, cfg.barStyle, cfg.switchPage = d.mascot, d.gpsView, d.barStyle, d.switchPage
+  return M.saveConfig(cfg)
+end
+
+-- Everything back to the defaults: module switches, FC modes and display settings.
+function M.factoryReset()
+  local cfg, fresh = M.loadConfig(), M.defaultConfig()
+  if cfg then fresh.flightTime, fresh.generation = cfg.flightTime, cfg.generation end
+  return M.saveConfig(fresh)
 end
 
 -- Switches of the active model, the mascot, the flight time, GPS view and bar style choice, re-read

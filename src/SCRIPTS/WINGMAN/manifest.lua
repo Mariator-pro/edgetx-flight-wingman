@@ -3,7 +3,8 @@
 -- =====================================================================
 -- SD card path: /SCRIPTS/WINGMAN/manifest.lua
 -- Loaded only by the settings tool. The module switches per model are on
--- the Models page, the mascot and the flight time on Display.
+-- the Models page, the mascot and the flight time on Display; the resets run
+-- core functions.
 -- =====================================================================
 -- SPDX-License-Identifier: GPL-2.0-only
 -- Copyright (C) 2026 Mariator-pro
@@ -33,6 +34,14 @@ return function(core)
         hint = "Battery and link bars: plain, blocks or zones" },
       { key = "switchPage", page = "display", label = "Switch page", type = "bool", default = true,
         hint = "Switches and FC modes on the wait page (aileron right)" },
+    },
+
+    -- id never changes once released: other programs recognise a reset by it, not by its label
+    resets = {
+      { id = "settings", label = "Reset settings", ask = "Reset Wingman settings to factory defaults? Models and FC modes stay.",
+        run = core.resetSettings },
+      { id = "factory",  label = "Factory reset", ask = "Reset Wingman to factory settings? All models, FC modes and settings are erased.",
+        run = core.factoryReset },
     },
   }
 end

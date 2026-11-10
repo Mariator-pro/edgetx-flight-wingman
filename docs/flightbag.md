@@ -84,8 +84,8 @@ so no reset changes them.
 | GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. Last flights stay. |
 | GPS Homer | **Clear last flights** | Empties the list on the Last flights page. Settings stay. |
 | GPS Homer | **Factory reset** | Both of the above. |
-
-Flight Wingman has no resets of its own (its popup shows **Files** and **Close**).
+| Flight Wingman | **Reset settings** | Mascot, GPS view, bar style and switch page back to the defaults. The modules shown per model and the FC modes stay. |
+| Flight Wingman | **Factory reset** | Also turns all modules back on for every model and clears the stored FC modes. |
 
 > **Updating from an older version?** Flight Bag replaces the old Tools entries "Lipo Nanny", "Link Sentinel" and
 > "GPS Homer" and removes them on first start. If one still shows up, delete `/SCRIPTS/TOOLS/LIPONY.lua`,
