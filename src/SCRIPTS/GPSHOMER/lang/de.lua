@@ -30,12 +30,10 @@ return {
   },
   resets = {
     settings = { label = "Einstellungen zurücksetzen",
-                 ask = "Einstellungen von GPS Homer auf Werkseinstellungen zurücksetzen? Die letzten Flüge bleiben.",
-                 desc = 'GPS Homer bekommt wieder seine Werkseinstellungen. Die Liste "Letzte Flüge" bleibt.' },
-    flights  = { label = "Letzte Flüge leeren", ask = 'Liste "Letzte Flüge" leeren? Die Einstellungen bleiben.',
-                 desc = 'Die Liste "Letzte Flüge" wird geleert. Die Einstellungen bleiben.' },
-    factory  = { label = "Alles zurücksetzen", ask = 'GPS Homer zurücksetzen und die Liste "Letzte Flüge" leeren?',
-                 desc = 'GPS Homer bekommt wieder seine Werkseinstellungen, und die Liste "Letzte Flüge" wird geleert.' },
+                 ask = 'Einstellungen von GPS Homer zurücksetzen? Die Liste "Letzte Flüge" bleibt.',
+                 desc = 'Die Einstellungen von GPS Homer bekommen wieder ihre Vorgaben. Die Liste "Letzte Flüge" bleibt, ebenso die Einstellungen für alle Apps (Töne, Vibration, Sprache).' },
+    flights  = { label = "Letzte Flüge löschen", ask = "Letzte Flüge von GPS Homer löschen? Die Einstellungen bleiben.",
+                 desc = 'Die Liste "Letzte Flüge" wird gelöscht. Die Einstellungen bleiben.' },
   },
   setup = {
     damaged        = "Einstellungsdatei beschädigt",

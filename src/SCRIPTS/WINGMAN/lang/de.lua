@@ -24,11 +24,11 @@ return {
   },
   resets = {
     settings = { label = "Einstellungen zurücksetzen",
-                 ask = "Einstellungen von Wingman auf Werkseinstellungen zurücksetzen? Modelle und FC-Modi bleiben.",
-                 desc = "Maskottchen, GPS-Ansicht, Balkenstil und Schalterseite bekommen wieder die Werkseinstellungen. Modelle und FC-Modi bleiben." },
-    factory  = { label = "Alles zurücksetzen",
-                 ask = "Wingman auf Werkseinstellungen zurücksetzen? Alle Modelle, FC-Modi und Einstellungen werden gelöscht.",
-                 desc = "Alle Modelle, FC-Modi und Einstellungen werden gelöscht. Jedes Modell zeigt wieder Akku, Verbindung und GPS." },
+                 ask = "Einstellungen von Wingman zurücksetzen? \"In Wingman zeigen\" und FC-Modi bleiben.",
+                 desc = "Maskottchen, GPS-Ansicht, Balkenstil und Schalterseite bekommen wieder ihre Vorgaben. \"In Wingman zeigen\" aller Modelle und die gespeicherten FC-Modi bleiben. Flugzeit und Sprache bleiben, sie gelten für alle Apps." },
+    factory  = { label = "Alles löschen",
+                 ask = "Alles in Wingman löschen? \"In Wingman zeigen\" und FC-Modi werden gelöscht, die Einstellungen zurückgesetzt.",
+                 desc = "Jedes Modell zeigt wieder Akku, Verbindung und GPS, die gespeicherten FC-Modi werden gelöscht und die Einstellungen bekommen ihre Vorgaben. Flugzeit und Sprache bleiben, sie gelten für alle Apps." },
   },
   setup = {
     coreMissing = "Core von {app} fehlt",

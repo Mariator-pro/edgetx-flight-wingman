@@ -30,12 +30,10 @@ return {
     dist  = { label = "Max distance", hint = "Farther than Max distance from home" },
   },
   resets = {
-    settings = { label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? Last flights stay.",
-                 desc = "GPS Homer goes back to its factory settings. The Last flights list stays." },
-    flights  = { label = "Clear last flights", ask = "Clear the last flights list? Settings stay.",
+    settings = { label = "Reset settings", ask = "Reset GPS Homer's settings? Last flights stay.",
+                 desc = "GPS Homer's settings go back to their defaults. The Last flights list stays, and so do the settings for all apps (Sounds, Vibration, Language)." },
+    flights  = { label = "Clear last flights", ask = "Clear GPS Homer's last flights? Settings stay.",
                  desc = "The Last flights list is emptied. The settings stay." },
-    factory  = { label = "Factory reset", ask = "Reset GPS Homer settings and clear the last flights list?",
-                 desc = "GPS Homer goes back to its factory settings, and the Last flights list is emptied." },
   },
   setup = {
     damaged        = "Settings file damaged",

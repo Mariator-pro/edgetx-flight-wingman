@@ -25,10 +25,11 @@ return {
                    choices = { en = "English", de = "Deutsch" } },
   },
   resets = {
-    settings = { label = "Reset settings", ask = "Reset Wingman settings to factory defaults? Models and FC modes stay.",
-                 desc = "Mascot, GPS view, bar style and switch page go back to factory settings. Models and FC modes stay." },
-    factory  = { label = "Factory reset", ask = "Reset Wingman to factory settings? All models, FC modes and settings are erased.",
-                 desc = "All models, FC modes and settings are erased. Every model shows battery, link and GPS again." },
+    settings = { label = "Reset settings", ask = "Reset Wingman's settings? \"Show in Wingman\" and FC modes stay.",
+                 desc = "Mascot, GPS view, bar style and switch page go back to their defaults. \"Show in Wingman\" of every model and the stored FC modes stay. Flight time and language stay, they apply to all apps." },
+    factory  = { label = "Erase everything",
+                 ask = "Erase everything in Wingman? \"Show in Wingman\" and FC modes are erased, settings are reset.",
+                 desc = "Every model shows battery, link and GPS again, the stored FC modes are erased and the settings go back to their defaults. Flight time and language stay, they apply to all apps." },
   },
   setup = {
     coreMissing = "{app} core missing",

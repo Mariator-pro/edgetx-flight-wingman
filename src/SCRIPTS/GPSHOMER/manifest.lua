@@ -53,7 +53,6 @@ return function(core, lang)
     resets = {
       { id = "settings", run = core.resetSettings },
       { id = "flights",  run = core.clearFlights },
-      { id = "factory",  run = core.factoryReset },
     },
   }
 

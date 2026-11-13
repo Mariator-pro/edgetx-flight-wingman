@@ -72,20 +72,22 @@ A **warning sign** on an icon means something needs attention: no settings file 
 sensor, or a setup step still open (for example no battery assigned to the active model). The popup names it in
 the warning colour.
 
-The resets ask for confirmation first. **Sounds**, **Vibration**, **Strength** and **Flight time** are shared rows,
-so no reset changes them.
+The resets ask for confirmation first. The name says what goes: **Reset settings** only resets settings and keeps
+data, **Clear ...** erases one kind of data, **Erase everything** erases all data of the app. **Sounds**,
+**Vibration**, **Strength**, **Flight time** and **Language** are shared rows, so no reset changes them.
 
 | Project | Button | What it does |
 |---|---|---|
 | Lipo Nanny | **Reset settings** | Thresholds and warning sounds back to the defaults. Batteries, models and statistics stay. |
-| Lipo Nanny | **Reset statistics** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Profiles and models stay. |
-| Lipo Nanny | **Factory reset** | Erases all batteries, models, statistics and settings. |
+| Lipo Nanny | **Clear statistics** | Zeroes every pack's cycle count and statistics (Life mAh, Vmin, Last used) and empties the archive. Batteries and models stay. |
+| Lipo Nanny | **Erase everything** | Erases all batteries, models, statistics and the archive, and resets the settings. |
 | Link Sentinel | **Reset settings** | All Link Sentinel settings back to the defaults. |
 | GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. Last flights stay. |
 | GPS Homer | **Clear last flights** | Empties the list on the Last flights page. Settings stay. |
-| GPS Homer | **Factory reset** | Both of the above. |
-| Flight Wingman | **Reset settings** | Mascot, GPS view, bar style and switch page back to the defaults. The modules shown per model and the FC modes stay. |
-| Flight Wingman | **Factory reset** | Also turns all modules back on for every model and clears the stored FC modes. |
+| Flight Wingman | **Reset settings** | Mascot, GPS view, bar style and switch page back to the defaults. Show in Wingman and the FC modes stay. |
+| Flight Wingman | **Erase everything** | Also turns all modules back on for every model (Show in Wingman) and clears the stored FC modes. |
+
+A missing settings file shows **Create**, a damaged one **Recreate**: it replaces the file with a new one.
 
 > **Updating from an older version?** Flight Bag replaces the old Tools entries "Lipo Nanny", "Link Sentinel" and
 > "GPS Homer" and removes them on first start. If one still shows up, delete `/SCRIPTS/TOOLS/LIPONY.lua`,
@@ -214,7 +216,7 @@ A read-only table, one row per pack, that the widget fills in as you fly:
 | **Vmin** | The lowest cell voltage ever seen under load, `-` if never flown. |
 | **Last used** | Date of the most recent flight (`YYYY-MM-DD`), or `-`. |
 
-**Reset statistics** in the Lipo Nanny popup clears them (together with the cycle counts).
+**Clear statistics** in the Lipo Nanny popup clears them (together with the cycle counts).
 
 ---
 
