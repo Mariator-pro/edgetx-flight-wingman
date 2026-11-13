@@ -10,7 +10,7 @@
 local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
-M.VERSION = "1.1.0"
+M.VERSION = "1.2.0"
 M.API     = { 1, 2 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
