@@ -162,8 +162,17 @@ M.DEFAULTS = {
   hapticStrength = M.PARAMS.HAPTIC_STRENGTH,
   maxAlt         = M.PARAMS.MAX_ALT,
   maxDist        = M.PARAMS.MAX_DIST,
+  language       = "en",
 }
 local DEFAULTS = M.DEFAULTS
+
+-- Languages of the settings tool's texts (/SCRIPTS/GPSHOMER/lang/<code>.lua); the
+-- widget and the announcements are English only.
+M.LANGUAGES = { "en", "de" }
+local function languageOr(v, fallback)
+  for _, code in ipairs(M.LANGUAGES) do if v == code then return v end end
+  return fallback
+end
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -422,6 +431,7 @@ function M.normalizeConfig(cfg)
   out.haptic         = boolOr(out.haptic, DEFAULTS.haptic)
   out.hapticStrength = clampNum(out.hapticStrength,
                          L.hapticStrength.min, L.hapticStrength.max, DEFAULTS.hapticStrength)
+  out.language       = languageOr(out.language, DEFAULTS.language)
   out.units          = nil   -- now the radio's setting; dropped from older configs
   out.maxAlt         = clampNum(out.maxAlt, L.maxAlt.min, L.maxAlt.max, DEFAULTS.maxAlt)
   out.maxDist        = clampNum(out.maxDist, L.maxDist.min, L.maxDist.max, DEFAULTS.maxDist)
@@ -596,12 +606,13 @@ function M.defaultConfig()
   return cfg
 end
 
--- Factory settings that keep the shared ones (audio, haptic): those are set once
+-- Factory settings that keep the shared ones (audio, haptic, language): those are set once
 -- for all scripts in the settings tool and no project reset touches them.
 local function freshKeepingShared()
   local cfg = M.loadConfig() or M.defaultConfig()
   local fresh = M.defaultConfig()
   fresh.audio, fresh.haptic, fresh.hapticStrength = cfg.audio, cfg.haptic, cfg.hapticStrength
+  fresh.language   = cfg.language
   fresh.generation = cfg.generation
   return fresh
 end
@@ -679,18 +690,19 @@ end
 -- Alt is optional: without it there is no altitude and no Max altitude warning.
 local REQUIRED = { "gps", "sats", "gspd", "hdg" }
 
--- Setup errors that need no telemetry, one text each (the settings tool lists
--- them; a widget only shows that there is one): required sensors not
--- discovered in the model. state as kept by update; without it a fresh one.
-function M.setupErrors(state)
+-- Setup problems that need no telemetry, as { id = ..., <values> } (the settings
+-- tool lists them; a widget only shows that there is one): required sensors not
+-- discovered in the model. An id never changes once released. state as kept by
+-- update; without it a fresh one.
+function M.setupIssues(state)
   state = state or M.newState()
   local out = {}
-  if M.configDamaged then out[1] = "Settings file damaged" end   -- defaults in use
+  if M.configDamaged then out[1] = { id = "damaged" } end   -- defaults in use
   -- The compass drawing (also loaded by other widgets) ships with the core.
   local ok, st = pcall(function() return fstat and fstat(M.COMPASS_PATH) end)
   if fstat and ok and not st then
-    out[#out + 1] = "Compass file missing"
-    out[#out + 1] = "Reinstall GPS Homer"
+    out[#out + 1] = { id = "compassMissing" }
+    out[#out + 1] = { id = "reinstall" }
   end
   local has = sensorsPresent(state, M.SENSORS, nowMs(), SENSOR_CHECK_MS)
   local missing = {}
@@ -698,8 +710,57 @@ function M.setupErrors(state)
     if not has[k] then missing[#missing + 1] = M.SENSORS[k] end
   end
   if #missing > 0 then
-    out[#out + 1] = "Missing sensors: " .. table.concat(missing, ", ")
-    out[#out + 1] = "Check sensors config"
+    out[#out + 1] = { id = "missingSensors", sensors = table.concat(missing, ", ") }
+    out[#out + 1] = { id = "checkSensors" }
+  end
+  return out
+end
+
+-- Texts of one language: T(area, id [, part [, key]]) gives the text, or nil. A
+-- text missing in that language comes from English, loaded when first needed.
+local LANG_DIR = "/SCRIPTS/GPSHOMER/lang/"
+local langEn
+local function loadLang(code)
+  local chunk = loadScript(LANG_DIR .. code .. ".lua")
+  local ok, t = false, nil
+  if chunk then ok, t = pcall(chunk) end
+  return ok and type(t) == "table" and t or {}
+end
+local function dig(t, a, b, c, d)
+  for _, k in ipairs({ a, b, c, d }) do
+    if type(t) ~= "table" then return nil end
+    t = t[k]
+  end
+  return t
+end
+function M.texts(code)
+  code = languageOr(code, "en")
+  local own = code ~= "en" and loadLang(code) or nil
+  return function(a, b, c, d)
+    local v = own and dig(own, a, b, c, d)
+    if v == nil then
+      langEn = langEn or loadLang("en")
+      v = dig(langEn, a, b, c, d)
+    end
+    return v
+  end
+end
+
+-- A text with its {name} placeholders filled from `values`.
+function M.fillText(s, values)
+  return (string.gsub(s, "{(%w+)}", function(k)
+    local v = values and values[k]
+    if v ~= nil then return tostring(v) end
+  end))
+end
+
+-- The setup problems as English sentences (the widgets show these); the texts
+-- are only loaded while there is a problem.
+function M.setupErrors(state)
+  local issues, out = M.setupIssues(state), {}
+  if #issues > 0 then
+    local T = M.texts("en")
+    for i, e in ipairs(issues) do out[i] = M.fillText(T("setup", e.id) or e.id, e) end
   end
   return out
 end

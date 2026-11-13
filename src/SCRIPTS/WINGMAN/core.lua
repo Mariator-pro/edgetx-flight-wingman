@@ -31,13 +31,14 @@ M.CORES = {
 -- Phases (flightPhase): no telemetry / preflight / flight / after unplugging.
 M.WAITING, M.PRE, M.FLIGHT, M.ENDED = "WAITING", "PRE", "FLIGHT", "ENDED"
 
--- Returns the module, or nil plus "missing" / "version".
+-- Returns the module, or nil plus "missing" / "version" (too old) / "newer".
 local function loadCore(c)
   local chunk = loadScript(c.path)
   if not chunk then return nil, "missing" end
   local ok, mod = pcall(chunk)
   if not ok or type(mod) ~= "table" then return nil, "missing" end
   local api = mod.API
+  if type(api) == "table" and type(api[1]) == "number" and api[1] > c.api[1] then return nil, "newer" end
   if type(api) ~= "table" or api[1] ~= c.api[1] or (api[2] or -1) < c.api[2] then
     return nil, "version"
   end
@@ -127,7 +128,7 @@ end
 M.flightPhase = flightPhase
 M.LINK_LOSS_T, M.ENDED_HOLD_T, M.PRE_HOLD_T = LINK_LOSS_T, ENDED_HOLD_T, PRE_HOLD_T
 -- Fresh state: loads the cores once and creates their contexts. err[name] tells
--- why a core is not available ("missing" / "version").
+-- why a core is not available ("missing" / "version" / "newer").
 function M.new()
   local w = { phase = M.WAITING, fs = {}, mods = {}, err = {}, fm = {}, lastTick = 0 }
   for name, c in pairs(M.CORES) do
@@ -1273,10 +1274,18 @@ M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the batter
 M.GPS_VIEWS = { "compass", "horizon" }      -- flight page GPS column, first = default
 M.BAR_STYLES = { "solid", "segments", "zones" }   -- battery, link and LQ bars, first = default
 
+-- Languages of the settings tool's texts (/SCRIPTS/WINGMAN/lang/<code>.lua); the
+-- widget and the announcements are English only.
+M.LANGUAGES = { "en", "de" }
+local function languageOr(v, fallback)
+  for _, code in ipairs(M.LANGUAGES) do if v == code then return v end end
+  return fallback
+end
+
 function M.defaultConfig()
   return { schemaVersion = M.CONFIG_SCHEMA_VERSION, generation = 0, models = {}, mascot = M.MASCOTS[1],
            flightTime = M.FLIGHT_TIMES[1], gpsView = M.GPS_VIEWS[1], barStyle = M.BAR_STYLES[1],
-           switchPage = true, modes = {} }
+           switchPage = true, language = M.LANGUAGES[1], modes = {} }
 end
 
 -- Returns the config, or nil plus "parse" | "schema" (and a detail text).
@@ -1297,6 +1306,7 @@ function M.loadConfig()
   if cfg.gpsView ~= M.GPS_VIEWS[2] then cfg.gpsView = M.GPS_VIEWS[1] end
   if cfg.barStyle ~= M.BAR_STYLES[2] and cfg.barStyle ~= M.BAR_STYLES[3] then cfg.barStyle = M.BAR_STYLES[1] end
   cfg.switchPage = cfg.switchPage ~= false
+  cfg.language = languageOr(cfg.language, M.LANGUAGES[1])
   if type(cfg.modes) ~= "table" then cfg.modes = {} end   -- switch page: FC modes by model file
   return cfg
 end
@@ -1350,7 +1360,7 @@ function M.setModules(cfg, filename, on)
   cfg.models[filename] = m
 end
 
--- Resets of the settings tool. The shared flight time stays in both.
+-- Resets of the settings tool. The shared flight time and language stay in both.
 -- Display settings back to the defaults; module switches and FC modes stay.
 -- False without a readable config, so a damaged file is never overwritten.
 function M.resetSettings()
@@ -1364,7 +1374,7 @@ end
 -- Everything back to the defaults: module switches, FC modes and display settings.
 function M.factoryReset()
   local cfg, fresh = M.loadConfig(), M.defaultConfig()
-  if cfg then fresh.flightTime, fresh.generation = cfg.flightTime, cfg.generation end
+  if cfg then fresh.flightTime, fresh.language, fresh.generation = cfg.flightTime, cfg.language, cfg.generation end
   return M.saveConfig(fresh)
 end
 
@@ -1387,12 +1397,13 @@ local function pollModules(w, now)
   return w.on
 end
 
--- Wingman's own setup errors: cores of switched-on modules that are missing or
--- too old, one text each for the settings tool. Without w (the tool) the cores
--- are loaded once to find out, with the active model's switches.
+-- Wingman's own setup problems: cores of switched-on modules that are missing,
+-- too old or too new, as { id = ..., app = name } for the settings tool. An id
+-- never changes once released. Without w (the tool) the cores are loaded once
+-- to find out, with the active model's switches.
 local CORE_NAMES = { { "lipo", "Lipo Nanny" }, { "link", "Link Sentinel" }, { "gps", "GPS Homer" } }
-local CORE_ERR   = { missing = "core missing", version = "core too old" }
-function M.setupErrors(w, on)
+local CORE_ERR   = { missing = "coreMissing", version = "coreOld", newer = "coreNew" }
+function M.setupIssues(w, on)
   on = on or M.modules(M.loadConfig(), activeModel())
   if not w then
     w = { err = {} }
@@ -1404,7 +1415,56 @@ function M.setupErrors(w, on)
   local out = {}
   for _, c in ipairs(CORE_NAMES) do
     local e = w.err[c[1]]
-    if e and on[c[1]] ~= false then out[#out + 1] = c[2] .. " " .. (CORE_ERR[e] or e) end
+    if e and on[c[1]] ~= false then out[#out + 1] = { id = CORE_ERR[e] or e, app = c[2] } end
+  end
+  return out
+end
+
+-- Texts of one language: T(area, id [, part [, key]]) gives the text, or nil. A
+-- text missing in that language comes from English, loaded when first needed.
+local LANG_DIR = "/SCRIPTS/WINGMAN/lang/"
+local langEn
+local function loadLang(code)
+  local chunk = loadScript(LANG_DIR .. code .. ".lua")
+  local ok, t = false, nil
+  if chunk then ok, t = pcall(chunk) end
+  return ok and type(t) == "table" and t or {}
+end
+local function dig(t, a, b, c, d)
+  for _, k in ipairs({ a, b, c, d }) do
+    if type(t) ~= "table" then return nil end
+    t = t[k]
+  end
+  return t
+end
+function M.texts(code)
+  code = languageOr(code, "en")
+  local own = code ~= "en" and loadLang(code) or nil
+  return function(a, b, c, d)
+    local v = own and dig(own, a, b, c, d)
+    if v == nil then
+      langEn = langEn or loadLang("en")
+      v = dig(langEn, a, b, c, d)
+    end
+    return v
+  end
+end
+
+-- A text with its {name} placeholders filled from `values`.
+function M.fillText(s, values)
+  return (string.gsub(s, "{(%w+)}", function(k)
+    local v = values and values[k]
+    if v ~= nil then return tostring(v) end
+  end))
+end
+
+-- The setup problems as English sentences (the widgets show these); the texts
+-- are only loaded while there is a problem.
+function M.setupErrors(w, on)
+  local issues, out = M.setupIssues(w, on), {}
+  if #issues > 0 then
+    local T = M.texts("en")
+    for i, e in ipairs(issues) do out[i] = M.fillText(T("setup", e.id) or e.id, e) end
   end
   return out
 end
@@ -1415,10 +1475,11 @@ local function appSetupError(w, on)
   local m = w.mods
   if on.lipo ~= false and m.lipo then
     m.lipo.pollConfig(w.lipo)   -- throttled in the core; Wingman may not tick it
-    if #m.lipo.setupErrors(w.lipo) > 0 then return true end
+    if #(m.lipo.setupIssues or m.lipo.setupErrors)(w.lipo) > 0 then return true end
   end
-  if on.link ~= false and m.link and #m.link.setupErrors(w.link) > 0 then return true end
-  if on.gps ~= false and m.gps and #m.gps.setupErrors(w.gps) > 0 then return true end
+  -- by id where the core offers it: no texts are built or loaded for the count
+  if on.link ~= false and m.link and #(m.link.setupIssues or m.link.setupErrors)(w.link) > 0 then return true end
+  if on.gps ~= false and m.gps and #(m.gps.setupIssues or m.gps.setupErrors)(w.gps) > 0 then return true end
   return false
 end
 

@@ -18,7 +18,7 @@ All screenshots show a TX16S MK3 with all four projects installed. With fewer pr
 - [Batteries](#batteries) (Lipo Nanny)
 - [Models](#models) (Lipo Nanny, Flight Wingman)
 - [Last flights](#last-flights) (GPS Homer)
-- [Display](#display) (Flight Wingman, Lipo Nanny)
+- [Display](#display)
 - [Units](#units)
 
 ---
@@ -38,7 +38,7 @@ The start page lists the topic pages on top and the installed projects as icons 
 | **Batteries** | Your battery *profiles* (a type of battery) and their physical *packs*. | Lipo Nanny |
 | **Models** | Per model: cell count, single or parallel packs, assigned batteries, sensors, what Wingman shows. | Lipo Nanny, Flight Wingman |
 | **Last flights** | Where the model was when the telemetry ended, for the last three flights, with a QR code. | GPS Homer |
-| **Display** | What the widgets show (flight time, mascot, GPS view, bar style, switch page). | Flight Wingman, Lipo Nanny |
+| **Display** | What the widgets show (flight time, mascot, GPS view, bar style, switch page) and the language of Flight Bag. | all |
 
 Navigation: the rotary wheel moves the cursor, **Enter** opens a page (`>`) or edits a field, **Exit/RTN** goes
 back. On touch radios you can also tap the pages and icons of the start page. The line with the **i** at the
@@ -105,7 +105,7 @@ One block per project with its thresholds.
 
 | Row | Notes |
 |---|---|
-| **Minimum satellites** | How many satellites must be locked before home is set. **4-20** (default 6). Higher gives a more accurate home but sets it a little later. |
+| **Minimum satellites** | How many satellites a valid GPS fix needs. **4-20** (default 6). With fewer there is no "Ready to fly", and arming sets no home. Higher gives a more accurate home but takes a little longer to reach. |
 | **Max altitude** | `Off` (default) or **10-500** in steps of 10, in the unit of your altitude sensor. Above this height over home the radio says "Maximum altitude" once, and again only after the model has dropped 10 below the limit. With the default ELRS telemetry ratio the altitude arrives only every few seconds, so the warning can come a little late. While above, ALT on the widget turns red. |
 | **Max distance** | `Off` (default) or **100-5000** in steps of 100, in m or ft (the radio's units). Farther than this from home the radio says "Maximum distance" once, and again only after the model has come 100 closer. While farther, DIST on the widget turns red. |
 
@@ -335,7 +335,7 @@ empties the list.
 
 ## Display
 
-What the widgets show. The shared row on top applies to Flight Wingman and Lipo Nanny at once, then the Flight Wingman block.
+What the widgets show, and the language of Flight Bag. The shared rows on top apply to several projects at once, then the Flight Wingman block.
 
 <p align="center">
   <img src="img/flightbag-display.png" width="480" alt="Display page">
@@ -344,6 +344,7 @@ What the widgets show. The shared row on top applies to Flight Wingman and Lipo 
 | Row | Notes |
 |---|---|
 | **Flight time** | The small value beside the battery percentage in flight, in Flight Wingman and in the Lipo Nanny widget: `EdgeTX Timer 1` (default, the model's Timer 1, shown as **TIMER**; nothing while Timer 1 is off) or `Remaining Timer` (Lipo Nanny's estimate of the remaining flight time, shown as **TIME LEFT**, `calc..` for the first 30 s of flying). If the two projects were set differently before, the row shows **Mixed** until you choose a value. |
+| **Language** | The language of Flight Bag: `English` (default) or `Deutsch`. It applies to every page of Flight Bag and is stored in every installed project. The widgets and the announcements stay English. If the projects differ (for example after one was installed again), the row shows **Mixed** and Flight Bag is English until you choose again. |
 
 **Flight Wingman**
 

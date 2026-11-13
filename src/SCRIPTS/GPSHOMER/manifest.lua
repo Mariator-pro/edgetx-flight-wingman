@@ -2,69 +2,79 @@
 -- manifest.lua  --  GPS Homer as seen by the Flight Bag settings tool
 -- =====================================================================
 -- SD card path: /SCRIPTS/GPSHOMER/manifest.lua
--- Loaded only by the settings tool. Labels and hints live here; ranges,
+-- Loaded only by the settings tool. Fields, sounds, resets and files by id;
+-- their texts come from lang/<code>.lua (lang: "en" when left out). Ranges,
 -- defaults, sound slots and the config file live in core.lua.
 -- =====================================================================
 -- SPDX-License-Identifier: GPL-2.0-only
 -- Copyright (C) 2026 Mariator-pro
 -- =====================================================================
 
-return function(core)
+return function(core, lang)
   local L, D = core.LIMITS, core.DEFAULTS
-  return {
-    name  = "GPS Homer",
-    url   = "github.com/Mariator-pro/edgetx-gps-homer",
+  local T = core.texts(lang)
+  local function lengthUnit() return core.PARAMS.UNITS == "imperial" and "ft" or "m" end
+  local man = {
+    name    = "GPS Homer",
+    author  = "Mariator-pro",
+    license = "GPL-2.0",
+    url     = "github.com/Mariator-pro/edgetx-gps-homer",
+    -- ids never change once released: other programs recognise an entry by it
     paths = {
-      { "Core",    "/SCRIPTS/GPSHOMER/core.lua" },
-      { "Config",  core.CONFIG_PATH },
-      { "Flights", core.FLIGHTS_PATH },
-      { "Widget",  "/WIDGETS/GPSHOMER/main.lua" },
-      { "Func",    "/SCRIPTS/FUNCTIONS/gpshom.lua" },
-      { "Sounds",  core.SOUND_DIR },
+      { id = "core",    path = "/SCRIPTS/GPSHOMER/core.lua" },
+      { id = "config",  path = core.CONFIG_PATH },
+      { id = "flights", path = core.FLIGHTS_PATH },
+      { id = "widget",  path = "/WIDGETS/GPSHOMER/main.lua" },
+      { id = "func",    path = "/SCRIPTS/FUNCTIONS/gpshom.lua" },
+      { id = "sounds",  path = core.SOUND_DIR },
     },
 
     fields = {
-      { key = "homeMinSats", page = "warnings", label = "Minimum satellites",
+      { key = "homeMinSats", page = "warnings",
         min = L.homeMinSats.min, max = L.homeMinSats.max, step = L.homeMinSats.step,
-        default = D.homeMinSats,
-        hint = "Home is set once %v satellites are stable" },
-      { key = "maxAlt", page = "warnings", label = "Max altitude",
+        default = D.homeMinSats },
+      { key = "maxAlt", page = "warnings",
         min = L.maxAlt.min, max = L.maxAlt.max, step = L.maxAlt.step,
-        default = D.maxAlt, off = 0,
-        unit = function() return core.PARAMS.UNITS == "imperial" and "ft" or "m" end,
-        hint = "Announce once when higher than %v above home" },
-      { key = "maxDist", page = "warnings", label = "Max distance",
+        default = D.maxAlt, off = 0, unit = lengthUnit },
+      { key = "maxDist", page = "warnings",
         min = L.maxDist.min, max = L.maxDist.max, step = L.maxDist.step,
-        default = D.maxDist, off = 0,
-        unit = function() return core.PARAMS.UNITS == "imperial" and "ft" or "m" end,
-        hint = "Announce once when farther than %v from home" },
-      { key = "audio", page = "alerts", label = "Sounds", shared = true,
-        type = "bool", default = D.audio, hint = "Off silences every announcement, vibration stays" },
-      { key = "haptic", page = "alerts", label = "Vibration", shared = true,
-        type = "bool", default = D.haptic },
-      { key = "hapticStrength", page = "alerts", label = "Strength", shared = true,
-        type = "choice", choices = { 1, 2, 3 }, labels = { "Soft", "Normal", "Strong" },
-        default = D.hapticStrength },
+        default = D.maxDist, off = 0, unit = lengthUnit },
+      { key = "audio", page = "alerts", shared = true, type = "bool", default = D.audio },
+      { key = "haptic", page = "alerts", shared = true, type = "bool", default = D.haptic },
+      { key = "hapticStrength", page = "alerts", shared = true,
+        type = "choice", choices = { 1, 2, 3 }, default = D.hapticStrength },
+      { key = "language", page = "display", shared = true,
+        type = "choice", choices = core.LANGUAGES, default = D.language },
     },
 
     -- Rows on the Alerts page, in core.SOUND_KEYS order
-    sounds = {
-      ready = { label = "Ready to fly", hint = "GPS fix is stable, safe to arm" },
-      fix   = { label = "Home set",     hint = "Home stored when arming (or at first stable fix)" },
-      lost  = { label = "GPS lost",     hint = "GPS fix lost for a few seconds" },
-      rec   = { label = "GPS recovered", hint = "GPS fix is back after a loss" },
-      alt   = { label = "Max altitude", hint = "Higher than Max altitude above home" },
-      dist  = { label = "Max distance", hint = "Farther than Max distance from home" },
-    },
+    sounds = {},
 
-    -- id never changes once released: other programs recognise a reset by it, not by its label
     resets = {
-      { id = "settings", label = "Reset settings", ask = "Reset GPS Homer settings to factory defaults? Last flights stay.",
-        run = core.resetSettings },
-      { id = "flights",  label = "Clear last flights", ask = "Clear the last flights list? Settings stay.",
-        run = core.clearFlights },
-      { id = "factory",  label = "Factory reset", ask = "Reset GPS Homer settings and clear the last flights list?",
-        run = core.factoryReset },
+      { id = "settings", run = core.resetSettings },
+      { id = "flights",  run = core.clearFlights },
+      { id = "factory",  run = core.factoryReset },
     },
   }
+
+  -- The texts, in the shape the settings tool reads: a file as { label, path },
+  -- a field's label, hint (%v: its value) and labels of its choices.
+  for _, p in ipairs(man.paths) do p[1], p[2] = T("files", p.id) or p.id, p.path end
+  for _, f in ipairs(man.fields) do
+    f.label = T("fields", f.key, "label") or f.key
+    local hint = T("fields", f.key, "hint")
+    if hint then f.hint = string.gsub(hint, "{v}", "%%v") end
+    if f.choices then
+      f.labels = {}
+      for i, c in ipairs(f.choices) do f.labels[i] = T("fields", f.key, "choices", c) or tostring(c) end
+    end
+  end
+  for _, key in ipairs(core.SOUND_KEYS) do
+    man.sounds[key] = { label = T("sounds", key, "label") or key, hint = T("sounds", key, "hint") }
+  end
+  for _, r in ipairs(man.resets) do
+    r.label = T("resets", r.id, "label") or r.id
+    r.ask, r.desc = T("resets", r.id, "ask"), T("resets", r.id, "desc")
+  end
+  return man
 end
