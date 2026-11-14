@@ -38,7 +38,7 @@ The start page lists the topic pages on top and the installed projects as icons 
 | **Batteries** | Your battery *profiles* (a type of battery) and their physical *packs*. | Lipo Nanny |
 | **Models** | Per model: cell count, single or parallel packs, assigned batteries, sensors, what Wingman shows. | Lipo Nanny, Flight Wingman |
 | **Last flights** | Where the model was when the telemetry ended, for the last three flights, with a QR code. | GPS Homer |
-| **Display** | What the widgets show (flight time, mascot, GPS view, bar style, switch page) and the language of Flight Bag. | all |
+| **Display** | What the widgets show (flight time, mascot, page style, bar style, switch page) and the language of Flight Bag. | all |
 
 Navigation: the rotary wheel moves the cursor, **Enter** opens a page (`>`) or edits a field, **Exit/RTN** goes
 back. On touch radios you can also tap the pages and icons of the start page. The line with the **i** at the
@@ -84,7 +84,7 @@ data, **Clear ...** erases one kind of data, **Erase everything** erases all dat
 | Link Sentinel | **Reset settings** | All Link Sentinel settings back to the defaults. |
 | GPS Homer | **Reset settings** | All GPS Homer settings back to the defaults. Last flights stay. |
 | GPS Homer | **Clear last flights** | Empties the list on the Last flights page. Settings stay. |
-| Flight Wingman | **Reset settings** | Mascot, GPS view, bar style and switch page back to the defaults. Show in Wingman and the FC modes stay. |
+| Flight Wingman | **Reset settings** | Mascot, page style, bar style and switch page back to the defaults. Show in Wingman and the FC modes stay. |
 | Flight Wingman | **Erase everything** | Also turns all modules back on for every model (Show in Wingman) and clears the stored FC modes. |
 
 A missing settings file shows **Create**, a damaged one **Recreate**: it replaces the file with a new one.
@@ -353,9 +353,21 @@ What the widgets show, and the language of Flight Bag. The shared rows on top ap
 | Row | Notes |
 |---|---|
 | **Mascot** | The character on the waiting page, `Quad` (default) or `Scout`. |
-| **GPS view** | The layout of the flight page, `Compass` (default) or `Horizon` (large artificial horizon from the flight controller's pitch and roll). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds). |
-| **Bar style** | How the battery, link and LQ bars look on the flight and preflight pages: `Solid` (default, one bar with marks at the thresholds), `Segments` (20 blocks, empty blocks in a warning range tinted yellow or red) or `Zones` (a thinner bar with a strip below it showing the warning ranges and a pointer at the current value). |
+| **Page style** | The look of the flight page: `Compass` (default), `Horizon` (large artificial horizon from the flight controller's pitch and roll) or `Tiles` (three large tiles for a quick glance, also on the preflight page: battery, home arrow and range fill up and turn yellow or red). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds). |
+| **Bar style** | How the battery, link and LQ bars (with `Tiles`: the fill of the tiles) look on the flight and preflight pages: `Solid` (default, one bar with marks at the thresholds), `Segments` (20 blocks, empty blocks in a warning range tinted yellow or red) or `Zones` (a thinner bar with a strip below it showing the warning ranges and a pointer at the current value). |
 | **Switch page** | `On` (default): on the waiting page, hold the aileron stick right for a second to see every switch of the radio with its channel, the flight modes it switches on in Betaflight or INAV (read from the flight controller at each connection and kept per model) and the special functions on each position; hold it left to go back. `Off` hides the page and skips the reading. |
+
+The preflight page, which only `Tiles` changes:
+
+| <img src="img/widget-preflight.png" width="400" alt="Preflight page with Compass or Horizon: battery, GPS and link columns with their values, below a green GO field with the countdown"> | <img src="img/widget-preflight-tiles.png" width="400" alt="Preflight page with tiles: battery, GPS and link filled green, below a green GO field with the countdown"> |
+|:---:|:---:|
+| `Compass`, `Horizon` | `Tiles` |
+
+The three page styles on the flight page:
+
+| <img src="img/widget-flight.png" width="260" alt="Flight page with compass: battery column on the left, compass with the home arrow in the middle, link column on the right"> | <img src="img/widget-flight-horizon.png" width="260" alt="Flight page with horizon: a large artificial horizon in the middle between the battery and the link column"> | <img src="img/widget-flight-tiles.png" width="260" alt="Flight page with tiles: battery at 63 %, an arrow pointing home, RANGELIMIT at 32 %"> |
+|:---:|:---:|:---:|
+| `Compass` | `Horizon` | `Tiles` |
 
 The two mascots on the waiting page:
 

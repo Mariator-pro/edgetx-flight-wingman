@@ -48,9 +48,9 @@ Flight Wingman brings **battery, radio link and the way home together on one scr
 Three widgets side by side share a small screen, yet each phase of a flight needs different values. Flight Wingman sorts by phase instead of by topic: before take-off it answers *"Am I ready to go?"*, in flight *"Do I have to react now?"*, after landing *"Did everything go well?"* and after a crash *"Where is the model?"*.
 
 <p align="center">
-  <img src="docs/img/widget-carousel.gif" width="800" alt="Flight Wingman pages one after another: waiting, preflight, flight with compass, flight with horizon, post-flight, search and switches">
+  <img src="docs/img/widget-carousel.gif" width="800" alt="Flight Wingman pages one after another: waiting, preflight, flight with compass, flight with horizon, flight with tiles, post-flight, search and switches">
   <br>
-  <a href="docs/img/widget-waiting.png">Waiting</a> · <a href="docs/img/widget-preflight.png">Preflight</a> · <a href="docs/img/widget-flight.png">Flight, compass</a> · <a href="docs/img/widget-flight-horizon.png">Flight, horizon</a> · <a href="docs/img/widget-end.png">Post-flight</a> · <a href="docs/img/widget-search.png">Search</a> · <a href="docs/img/widget-switches.png">Switches</a>
+  <a href="docs/img/widget-waiting.png">Waiting</a> · <a href="docs/img/widget-preflight.png">Preflight</a> · <a href="docs/img/widget-flight.png">Flight, compass</a> · <a href="docs/img/widget-flight-horizon.png">Flight, horizon</a> · <a href="docs/img/widget-flight-tiles.png">Flight, tiles</a> · <a href="docs/img/widget-end.png">Post-flight</a> · <a href="docs/img/widget-search.png">Search</a> · <a href="docs/img/widget-switches.png">Switches</a>
 </p>
 
 - **One screen, three columns:** battery from Lipo Nanny, home arrow from GPS Homer, link from Link Sentinel, each with the same colors and thresholds as the single widget.
@@ -101,7 +101,9 @@ SCRIPTS/
     └── FLIGHTBAG.lua       ← Tools menu entry
 WIDGETS/
 └── WINGMAN/
-    └── main.lua            ← widget
+    ├── main.lua            ← widget
+    ├── horizon.lua         ← flight page for page style "Horizon"
+    └── tiles.lua           ← pages for page style "Tiles"
 SOUNDS/
 └── en/
     └── SCRIPTS/            ← all .wav files of the three projects

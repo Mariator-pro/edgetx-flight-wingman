@@ -717,7 +717,7 @@ end
 
 local function preGps(w, g)
   return { sats = g.sats, state = w.mods.gps.fixState(g), dop = g.dop, dopKind = g.dopKind, fix = g.fix,
-           fixLost = g.fixLost }
+           fixLost = g.fixLost, minSats = w.mods.gps.PARAMS.HOME_MIN_SATS }
 end
 
 local function linkView(w, r)
@@ -1271,7 +1271,7 @@ local CONFIG_POLL = 500   -- getTime units: 5 s
 
 M.MASCOTS = { "quad", "scout" }   -- wait page character, first = default
 M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the battery %, first = default
-M.GPS_VIEWS = { "compass", "horizon" }      -- flight page GPS column, first = default
+M.GPS_VIEWS = { "compass", "horizon", "tiles" }   -- page style, first = default
 M.BAR_STYLES = { "solid", "segments", "zones" }   -- battery, link and LQ bars, first = default
 
 -- Languages of the settings tool's texts (/SCRIPTS/WINGMAN/lang/<code>.lua); the
@@ -1303,7 +1303,7 @@ function M.loadConfig()
   if type(cfg.models) ~= "table" then cfg.models = {} end
   if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
   if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
-  if cfg.gpsView ~= M.GPS_VIEWS[2] then cfg.gpsView = M.GPS_VIEWS[1] end
+  if cfg.gpsView ~= M.GPS_VIEWS[2] and cfg.gpsView ~= M.GPS_VIEWS[3] then cfg.gpsView = M.GPS_VIEWS[1] end
   if cfg.barStyle ~= M.BAR_STYLES[2] and cfg.barStyle ~= M.BAR_STYLES[3] then cfg.barStyle = M.BAR_STYLES[1] end
   cfg.switchPage = cfg.switchPage ~= false
   cfg.language = languageOr(cfg.language, M.LANGUAGES[1])
