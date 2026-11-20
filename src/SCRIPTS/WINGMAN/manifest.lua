@@ -18,6 +18,7 @@ return function(core, lang)
     author  = "Mariator-pro",
     license = "GPL-2.0",
     url     = "github.com/Mariator-pro/edgetx-flight-wingman",
+    widget  = "Wingman",   -- widget name as EdgeTX stores it in the model file
     -- ids never change once released: other programs recognise an entry by it
     paths = {
       { id = "core",   path = "/SCRIPTS/WINGMAN/core.lua" },

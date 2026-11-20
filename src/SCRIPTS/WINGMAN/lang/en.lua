@@ -26,7 +26,7 @@ return {
   },
   resets = {
     settings = { label = "Reset settings", ask = "Reset Wingman's settings? \"Show in Wingman\" and FC modes stay.",
-                 desc = "Mascot, GPS view, bar style and switch page go back to their defaults. \"Show in Wingman\" of every model and the stored FC modes stay. Flight time and language stay, they apply to all apps." },
+                 desc = "Mascot, page style, bar style and switch page go back to their defaults. \"Show in Wingman\" of every model and the stored FC modes stay. Flight time and language stay, they apply to all apps." },
     factory  = { label = "Erase everything",
                  ask = "Erase everything in Wingman? \"Show in Wingman\" and FC modes are erased, settings are reset.",
                  desc = "Every model shows battery, link and GPS again, the stored FC modes are erased and the settings go back to their defaults. Flight time and language stay, they apply to all apps." },

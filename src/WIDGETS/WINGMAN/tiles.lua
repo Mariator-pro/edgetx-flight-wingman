@@ -244,6 +244,20 @@ return function(K)
         title = "BATTERY", big = fmt("%d", b.pct), pct = b.pct or 0, level = b.level or 0,
         marks = batteryMarks(b), outer = "left",
         sub1 = fmt("%.2f V /cell", b.cell), sub1Col = lineCol(b.vLevel), sub2 = fmtMah(b.left) })
+    elseif v.noPack and c[1] then   -- armed without a chosen pack: a warning sign instead of the %
+      drawTile(L, c[1][1], y, c[1][2], h, {
+        title = "NO PACK", level = 1,
+        -- warning sign with "NO BATTERY" / "SELECTED" below it, centred in the room
+        draw = function(cx, cy, size)
+          local f = L.f.stage
+          local tri, gap, lh = math.floor(size * 0.45), L.s(16), fontH(f)
+          local top = cy - math.floor((tri + gap + 2 * lh) / 2)
+          K.drawWarnSign(cx, top, tri, WARN_COL, DARK_TEXT)
+          for i, t in ipairs({ "NO BATTERY", "SELECTED" }) do
+            dtext(cx - math.floor(textW(t, f) / 2), top + tri + gap + (i - 1) * lh, t, WARN_COL, f)
+          end
+        end,
+        sub2 = "No battery warnings" })
     end
     if g and c[2] then drawTile(L, c[2][1], y, c[2][2], h, homeTile(L, g, ctx)) end
     if l and c[3] then

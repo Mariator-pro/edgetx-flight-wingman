@@ -19,6 +19,8 @@ return function(core, lang)
     author  = "Mariator-pro",
     license = "GPL-2.0",
     url     = "github.com/Mariator-pro/edgetx-gps-homer",
+    widget  = "GPS Homer",   -- widget name as EdgeTX stores it in the model file
+    scripts = { "gpshom" },   -- function scripts in /SCRIPTS/FUNCTIONS/
     -- ids never change once released: other programs recognise an entry by it
     paths = {
       { id = "core",    path = "/SCRIPTS/GPSHOMER/core.lua" },

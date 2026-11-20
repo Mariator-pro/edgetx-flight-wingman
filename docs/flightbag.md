@@ -65,12 +65,19 @@ Tapping a project icon (or Enter on it) opens a popup with its version, the proj
 - **Files**: the paths of the project on the SD card.
 - **Create**: shown while the project has no settings file yet (a fresh install). It writes the defaults. The
   settings pages (Warnings, Alerts, Display) offer the same button in the project's block.
-- **Reset**: shown instead of the resets when the settings file is damaged. It replaces the file with the defaults.
+- **Recreate**: shown instead of the resets when the settings file is damaged. It replaces the file with the defaults.
 - **Close**.
 
 A **warning sign** on an icon means something needs attention: no settings file yet, a damaged file, a missing
 sensor, or a setup step still open (for example no battery assigned to the active model). The popup names it in
 the warning colour.
+
+A **grey icon** means the active model does not use the app: its widget is on none of the model's screens, none of
+its function scripts is switched on, and Wingman does not use it either (Wingman is not on the model, or the app's part
+is switched off in **Models → Show in Wingman**). An example is GPS Homer on a model without GPS. Missing sensors or a model not set up
+then count as no problem, and the popup names the reason: **Off for this model in Wingman** or **Not used on this
+model**. Its settings stay open, since they apply to all models. EdgeTX saves a new widget to the SD card a few
+seconds later, so right after adding one the icon may still be grey for a moment.
 
 The resets ask for confirmation first. The name says what goes: **Reset settings** only resets settings and keeps
 data, **Clear ...** erases one kind of data, **Erase everything** erases all data of the app. **Sounds**,
@@ -154,7 +161,7 @@ found and the volume is up. The sound folders always sit under `/SOUNDS/en/`, wh
 | Project | Sound folder | Rows |
 |---|---|---|
 | GPS Homer | `/SOUNDS/en/SCRIPTS/GPSHOMER/` | **Ready to fly**, **Home set**, **GPS lost**, **GPS recovered**, **Max altitude**, **Max distance**. Vibration: two pulses for GPS lost, Max altitude and Max distance, one for every other event. These three warnings also switch a dimmed display back on. |
-| Lipo Nanny | `/SOUNDS/en/SCRIPTS/LIPONY/` | **Battery low**, **Battery critical** (at the thresholds of the same name), **Battery not charged** (once, when a pack is already below Battery low as it is picked). Vibration: one pulse for Battery low and Battery not charged, two for Battery critical. |
+| Lipo Nanny | `/SOUNDS/en/SCRIPTS/LIPONY/` | **Battery low**, **Battery critical** (at the thresholds of the same name), **Battery not charged** (once, when a pack is already below Battery low as it is picked), **No battery selected** (once, when armed without a chosen pack). Vibration: one pulse for Battery low, Battery not charged and No battery selected, two for Battery critical. |
 | Link Sentinel | `/SOUNDS/en/SCRIPTS/SNTNL/` | **Link quality low** (Stage 1), **Link quality critical** (Stage 2), plus three that are `Off` by default: **Link lost** (once when the link is gone for 1.5 s during a flight, not after a disarm; `Default` says "Radio link lost", `telelost.wav` says "Radio link telemetry lost"; without `FM` from the flight controller it also plays when you unplug the battery after landing), **Link connected** (once when the link comes up for a new flight), **Link recovered** (once when the link comes back after it was lost during an armed flight). Vibration: one pulse for Stage 1, two for Stage 2. |
 
 ---

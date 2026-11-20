@@ -1033,6 +1033,35 @@ local function drawBattery(L, x, w, b, sideLabel, sideValue, sideCol)
   })
 end
 
+-- Warning sign: triangle h px high centred on cx from top, "!" in inner.
+local function drawWarnSign(cx, top, h, col, inner)
+  local hw = math.floor(h * 0.6)
+  fillTri(cx - hw, top + h, cx + hw, top + h, cx, top, col)
+  local bw = math.max(2, math.floor(h * 0.12))
+  lcd.drawFilledRectangle(cx - math.floor(bw / 2), top + math.floor(h * 0.35), bw, math.floor(h * 0.33), inner)
+  lcd.drawFilledRectangle(cx - math.floor(bw / 2), top + math.floor(h * 0.76), bw, bw, inner)
+end
+
+-- Battery column while armed without a chosen pack: no % and no warnings, so
+-- a yellow notice instead of an empty column.
+local function drawNoPack(L, x, w)
+  local s, cx = L.s(11), x + math.floor(w / 2)
+  lcd.drawFilledRectangle(x, L.y(21), s, s, WARN_COL)
+  btext(x + s + L.s(8), L.y(31), "NO PACK", WARN_COL, L.f.title)
+  drawWarnSign(cx, L.y(80), L.s(80), WARN_COL, DARK_TEXT)
+  local f = MIDSIZE
+  if textW("NO BATTERY", f) > w then f = L.f.value end
+  for i, t in ipairs({ "NO BATTERY", "SELECTED" }) do
+    btext(cx - math.floor(textW(t, f) / 2), L.y(225 + (i - 1) * 40), t, WARN_COL, f)
+  end
+  -- one line, or two where the column is narrow (horizon page)
+  local fv = L.f.value
+  local lines = (textW("No battery warnings", fv) <= w) and { "No battery warnings" } or { "No battery", "warnings" }
+  for i, t in ipairs(lines) do
+    btext(cx - math.floor(textW(t, fv) / 2), L.y(315 + (i - 1) * 32), t, COLORS.fg, fv)
+  end
+end
+
 -- TX power label with the link core's DYN / MAX tag (dynamic power below the
 -- maximum / at it or fixed); none while the module did not answer.
 local function txLabel(l)
@@ -1204,6 +1233,7 @@ local function loadView(name)
         HERO_Y = HERO_Y, BASELINE = BASELINE, HEARTBEAT_R = HEARTBEAT_R, BAR = BAR,
         levelCol = levelCol, smallCol = smallCol, reserveColor = reserveColor,
         drawTitle = drawTitle, packTitle = packTitle, drawStage = drawStage,
+        drawNoPack = drawNoPack, drawWarnSign = drawWarnSign,
         modeParts = modeParts, txLabel = txLabel, satBarsW = satBarsW, drawSatBars = drawSatBars,
       }
       for k, f in pairs(VIEW.more or {}) do VIEW.kit[k] = f end
@@ -1231,6 +1261,8 @@ local function drawFlight(ctx)
     else
       drawBattery(L, c[1], c[2], v.batt, "TIMER", ctx.w.timerS and fmtTimer(ctx.w.timerS), smallCol(ctx.w.timerLevel))
     end
+  elseif v.noPack and c[1] then
+    drawNoPack(L, c[1], c[2])
   end
   if v.gps and c[3] then drawGps(L, c[3], c[4], v.gps, ctx.w.alert, ctx) end
   if v.link and c[5] then drawLink(L, c[5], c[6], v.link, ctx.w.linkUp) end

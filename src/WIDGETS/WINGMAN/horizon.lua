@@ -1,5 +1,5 @@
 -- =====================================================================
--- horizon.lua  --  Flight Wingman widget: flight page for GPS view "Horizon".
+-- horizon.lua  --  Flight Wingman widget: flight page for page style "Horizon".
 -- =====================================================================
 -- SD card path: /WIDGETS/WINGMAN/horizon.lua
 -- Loaded by the widget only while this view is chosen. Draws with the
@@ -22,7 +22,7 @@ return function(K)
   local COLORS, U   -- theme colours and units of this frame
 
   -- ---------------------------------------------------------------------------
-  -- Horizon page (GPS view "Horizon"): status at the top, live values below.
+  -- Horizon page (page style "Horizon"): status at the top, live values below.
   -- Top: battery and link with a vertical bar at the outer edge, big value,
   -- caption and side value inside; satellites in the middle. Below: the battery
   -- and link values in rows at the sides, in the middle a large horizon with the
@@ -464,6 +464,9 @@ return function(K)
       else
         HZ.battery(L, z, v.batt, "TIMER", w.timerS and fmtTimer(w.timerS), smallCol(w.timerLevel))
       end
+    elseif v.noPack and on.lipo ~= false then
+      local x = L.x(18)
+      K.drawNoPack(L, x, L.x(HZ.X0) - L.x(26) - x)
     end
     HZ.sats(L, v.gps)
     HZ.middle(L, v.gps, ctx)

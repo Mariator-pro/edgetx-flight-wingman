@@ -538,11 +538,14 @@ end
 -- below: calculating, setup error); w.preReady is the last tick's GO.
 local function updatePhase(w, now, on)
   local up = linkUp()
+  local fm = getValue("FM")
+  -- Link up before AND after the read: a link that drops in between returns
+  -- FM 0, which reads as disarmed.
+  up = up and linkUp()
   w.linkUp = up   -- packets arriving right now (no grace), e.g. for a heartbeat
   w.rssi = getRSSI()   -- 0..99, meaning differs per radio system (CRSF: LQ %, FrSky: dB)
   local armed = false
   if up then
-    local fm = getValue("FM")
     w.mode = M.modeText(fm)
     -- Failsafe, rescue or landing from the mode text ("FS", "RTH", "LAND").
     local alertFromFM = w.mods.gps and w.mods.gps.alertFromFM
@@ -789,6 +792,8 @@ local function flightView(w, on)
     local b, cap = battView(L, w.mods.lipo)
     b.used, b.cap, b.amps, b.timeLeft = L.capacity, cap, L.current, L.timeLeftStr   -- Lipo Nanny's estimate, every 2 s
     v.batt = b
+  elseif lipoOn(w, on) then
+    v.noPack = true   -- armed without a chosen pack: no % and no battery warnings
   end
   local g, r = gpsRes(w, on), linkRes(w, on)
   if g then
@@ -1378,9 +1383,9 @@ function M.factoryReset()
   return M.saveConfig(fresh)
 end
 
--- Switches of the active model, the mascot, the flight time, GPS view and bar style choice, re-read
+-- Switches of the active model, the mascot, the flight time, page style and bar style choice, re-read
 -- every 5 s (a change in the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot, flight time, GPS view and bar style. The stored modes keep their
+-- file: all on, default mascot, flight time, page style and bar style. The stored modes keep their
 -- table while unchanged, so the switch page is not built again on every read.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end

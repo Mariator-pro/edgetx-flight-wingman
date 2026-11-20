@@ -1077,6 +1077,7 @@ end
 function M.readSnapshot(state, now)
   local S       = M.SENSORS
   local has     = sensorsPresent(state, S, now, SENSOR_CHECK_MS)
+  local up      = linkUp()
   local rawGps  = safeGet(S.gps)
   local gps     = M.validGps(rawGps) and { lat = rawGps.lat, lon = rawGps.lon } or nil
   local sats    = M.validRange(safeGet(S.sats), 0, 99)
@@ -1096,14 +1097,15 @@ function M.readSnapshot(state, now)
   roll  = roll and (math.deg(roll) + 540) % 360 - 180
   pitch = pitch and (math.deg(pitch) + 540) % 360 - 180
 
-  local telem = linkUp()
-
   local sensorMissing = false
   for _, k in ipairs(REQUIRED) do
     if not has[k] then sensorMissing = true end
   end
 
   local fm = readPresent(has, S, "fm")
+  -- Link up before AND after the reads: a link that drops in between returns 0
+  -- for every sensor (FM 0 reads as disarmed).
+  local telem = up and linkUp()
   local armed, armedKnown = armedFromFM(state, fm)
 
   -- Pitch nose up positive. Betaflight and INAV send nose down positive, ArduPilot
