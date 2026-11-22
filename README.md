@@ -138,9 +138,9 @@ Open **SYS → Tools → Apps → Flight Bag** and set up battery, link and GPS 
 
 ### Stick controls
 
-Touch and keys don't reach a widget in App mode, so Flight Wingman uses the sticks, and only while disarmed:
+Touch and keys don't reach a widget in App mode, so Flight Wingman uses the sticks, and only while disarmed. On a model without a flight controller (no flight mode sensor) it cannot tell armed from disarmed, so there the gestures only work with the throttle stick fully down:
 
-- **Pack selection:** elevator moves the cursor, aileron held right for 1 s confirms.
+- **Pack selection:** elevator moves the cursor, aileron held right for 1 s confirms. Forgot to choose a pack before arming? Disarm, and the flight page shows the selection again.
 - **Close the search page:** aileron held right for 1 s.
 - **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
 - **Show the last post-flight page again:** on the waiting page, aileron held left for 1 s.

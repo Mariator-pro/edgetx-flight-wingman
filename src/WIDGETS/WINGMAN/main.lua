@@ -1245,6 +1245,8 @@ local function loadView(name)
   return VIEW.pages
 end
 
+local drawPackList   -- pack selection in the battery column, with the preflight page below
+
 local function drawFlight(ctx)
   local v = ctx.w and ctx.w.flight
   if not v then return end
@@ -1261,9 +1263,12 @@ local function drawFlight(ctx)
     else
       drawBattery(L, c[1], c[2], v.batt, "TIMER", ctx.w.timerS and fmtTimer(ctx.w.timerS), smallCol(ctx.w.timerLevel))
     end
+  elseif v.packSel and c[1] then   -- disarmed again without a pack
+    drawPackList(L, c[1], c[2], v.packSel, ctx)
   elseif v.noPack and c[1] then
     drawNoPack(L, c[1], c[2])
   end
+  if not (v.packSel and c[1]) then ctx.marqueeRow = nil end   -- next selection starts its marquee anew
   if v.gps and c[3] then drawGps(L, c[3], c[4], v.gps, ctx.w.alert, ctx) end
   if v.link and c[5] then drawLink(L, c[5], c[6], v.link, ctx.w.linkUp) end
 end
@@ -1434,7 +1439,7 @@ do
   -- elevator gesture): accent while the elevator leans that way, nudging until
   -- the step counts. The selected name scrolls (restarting when the cursor
   -- moves), the others are cut.
-  local function drawPackList(L, x, w, b, ctx)   -- also drawn by the page style Tiles
+  function drawPackList(L, x, w, b, ctx)   -- also drawn on the flight page and by the views
     drawTitle(L, x, "SELECT PACK")
     local font = L.f.value
     local rowH = L.y(PACK_TOP + PACK_ROW_H) - L.y(PACK_TOP)

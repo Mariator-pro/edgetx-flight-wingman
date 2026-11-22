@@ -10,8 +10,8 @@
 local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
-M.VERSION = "1.2.0"
-M.API     = { 1, 2 }
+M.VERSION = "1.3.0"
+M.API     = { 1, 3 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
 -- Must be false on the radio: it replaces link, mode and the page values.
@@ -674,9 +674,10 @@ end
 -- stick reads 0 on the first tick, then full left).
 local CLOSE_AIL, CLOSE_DEAD, CLOSE_HOLD, CLOSE_SHOW = 922, 200, 100, 10   -- stick units (922: 90 %), getTime units
 local STICK_SEEN = 50   -- getTime units
+local THR_LOW = -922    -- throttle stick in its lowest 5 %
 local function unit(v) return math.max(-1, math.min(1, v / 1024)) end
 local function readStick(w, now)
-  w.ail, w.ele = getValue("ail") or 0, getValue("ele") or 0
+  w.ail, w.ele, w.thr = getValue("ail") or 0, getValue("ele") or 0, getValue("thr") or 0
   if math.abs(w.ail) < CLOSE_DEAD then
     w.centreSince = w.centreSince or now
     if now - w.centreSince >= STICK_SEEN then w.stickSeen = true end
@@ -685,6 +686,15 @@ local function readStick(w, now)
   end
   w.stick, w.stickEle = 0, 0
   if w.stickSeen then w.stick, w.stickEle = unit(w.ail), unit(w.ele) end
+end
+
+-- Gestures only on the ground. Without the link the sticks steer nothing; with a
+-- known armed state (a disarmed FM text seen on this link) only while disarmed;
+-- without one (no FC or no FM sensor) only with the throttle stick at the bottom.
+local function sticksFree(w)
+  if not w.connected then return true end
+  if w.fm.disarmSeen then return not w.armed end
+  return (w.thr or 0) <= THR_LOW
 end
 
 -- Chosen pack as the preflight and flight pages show it; also the capacity.
@@ -785,13 +795,15 @@ local function preView(w, on, now)
   return p
 end
 
-local function flightView(w, on)
+local function flightView(w, on, now)
   local v = {}
   if lipoOn(w, on) and w.lipo.selectedProfile then
     local L = w.lipo
     local b, cap = battView(L, w.mods.lipo)
     b.used, b.cap, b.amps, b.timeLeft = L.capacity, cap, L.current, L.timeLeftStr   -- Lipo Nanny's estimate, every 2 s
     v.batt = b
+  elseif lipoOn(w, on) and w.lipo.pendingSelection and not w.armed then
+    v.packSel = preBattery(w, now)   -- disarmed again without a pack: the selection as on the preflight page
   elseif lipoOn(w, on) then
     v.noPack = true   -- armed without a chosen pack: no % and no battery warnings
   end
@@ -916,8 +928,12 @@ end
 -- back to the centre. Returns the hold 0..1 and true once complete: the full
 -- hold is returned at least once and kept CLOSE_SHOW before it completes, so
 -- the bar is always seen full before the page changes. The gesture waits for
--- the stick seen in the centre (readStick).
+-- the stick seen in the centre (readStick) and is locked unless sticksFree.
 local function pollHold(w, now, sign)
+  if not sticksFree(w) then   -- in flight: drop a started hold, re-arm in the centre
+    w.closeSince, w.closeFullAt, w.closeArmed = nil, nil, false
+    return 0, false
+  end
   local ail = w.ail or 0
   if math.abs(ail) < CLOSE_DEAD and w.stickSeen then w.closeArmed = true end
   if w.closeArmed and sign * ail > CLOSE_AIL then
@@ -1069,7 +1085,7 @@ local function buildPages(w, on, now, connected)
   end
   if w.phase == M.FLIGHT then
     w.flown = true
-    w.flight = flightView(w, on)
+    w.flight = flightView(w, on, now)
   elseif w.phase == M.PRE then
     local L = lipoOn(w, on)
     local core = w.mods.lipo
@@ -1356,13 +1372,40 @@ function M.modules(cfg, filename)
   return on
 end
 
--- Stores a model's switches; an all-on model is removed from the file.
+-- Stores a model's switches; its other entries (own display settings) stay. A model
+-- with nothing left (all on, no setting of its own) is removed from the file.
+local MODULE_KEY = {}
+for _, k in ipairs(M.MODULES) do MODULE_KEY[k] = true end
 function M.setModules(cfg, filename, on)
   local m
+  for k, v in pairs(cfg.models[filename] or {}) do
+    if not MODULE_KEY[k] then m = m or {}; m[k] = v end
+  end
   for _, k in ipairs(M.MODULES) do
     if on[k] == false then m = m or {}; m[k] = false end
   end
   cfg.models[filename] = m
+end
+
+-- Display settings a model may have of its own (else the one for all models
+-- applies), stored by the same key in its model entry.
+M.MODEL_SETTINGS = { "gpsView", "barStyle" }
+local MODEL_CHOICES = { gpsView = M.GPS_VIEWS, barStyle = M.BAR_STYLES }
+
+-- A model's own value of such a setting, or nil when it uses the one for all models.
+function M.modelSetting(cfg, filename, key)
+  local m = cfg and filename and cfg.models[filename]
+  local v = type(m) == "table" and m[key] or nil
+  for _, c in ipairs(MODEL_CHOICES[key] or {}) do if v == c then return v end end
+  return nil
+end
+
+-- Stores a model's own value (nil: the one for all models); a model with
+-- nothing left is removed from the file.
+function M.setModelSetting(cfg, filename, key, value)
+  local m = cfg.models[filename] or {}
+  m[key] = value
+  cfg.models[filename] = next(m) ~= nil and m or nil
 end
 
 -- Resets of the settings tool. The shared flight time and language stay in both.
@@ -1383,7 +1426,8 @@ function M.factoryReset()
   return M.saveConfig(fresh)
 end
 
--- Switches of the active model, the mascot, the flight time, page style and bar style choice, re-read
+-- Switches of the active model, the mascot, the flight time, page style and bar style (the model's
+-- own or the one for all models), re-read
 -- every 5 s (a change in the settings tool or a model switch applies without a reload). A damaged
 -- file: all on, default mascot, flight time, page style and bar style. The stored modes keep their
 -- table while unchanged, so the switch page is not built again on every read.
@@ -1394,8 +1438,8 @@ local function pollModules(w, now)
   w.on = M.modules(cfg, file)
   w.mascot = cfg and cfg.mascot
   w.flightTime = cfg and cfg.flightTime
-  w.gpsView = cfg and cfg.gpsView
-  w.barStyle = cfg and cfg.barStyle
+  w.gpsView = cfg and (M.modelSetting(cfg, file, "gpsView") or cfg.gpsView)   -- the model's own first
+  w.barStyle = cfg and (M.modelSetting(cfg, file, "barStyle") or cfg.barStyle)
   w.switchPage = not cfg or cfg.switchPage
   local modes = cfg and file and cfg.modes[file] or nil
   if not (sameModes(w.modesEntry, modes) and w.modesEntry.date == modes.date) then w.modesEntry = modes end
@@ -1512,9 +1556,9 @@ function M.tick(w, on)
   -- With demo data the cores rest (no announcements from the simulator's sensors).
   local drive = not w.demo
   w.lipoOn = drive and on.lipo and w.lipo ~= nil and pcall(w.mods.lipo.tick, w.lipo)
-  -- Pack selection by stick (the LiPo core's gestures), disarmed only. Stick
-  -- gestures rest while the last tick showed a setup error (page hidden).
-  if w.lipoOn and not w.armed and not w.searching and not w.setupError and w.lipo.pendingSelection
+  -- Pack selection by stick (the LiPo core's gestures, locked in flight there
+  -- too). Stick gestures rest while the last tick showed a setup error (page hidden).
+  if w.lipoOn and sticksFree(w) and not w.searching and not w.setupError and w.lipo.pendingSelection
      and w.mods.lipo.pollSelectionSticks then
     pcall(w.mods.lipo.pollSelectionSticks, w.lipo)
   end

@@ -244,6 +244,10 @@ return function(K)
         title = "BATTERY", big = fmt("%d", b.pct), pct = b.pct or 0, level = b.level or 0,
         marks = batteryMarks(b), outer = "left",
         sub1 = fmt("%.2f V /cell", b.cell), sub1Col = lineCol(b.vLevel), sub2 = fmtMah(b.left) })
+    elseif v.packSel and c[1] then   -- disarmed again without a pack: the selection as on the preflight page
+      local x, tw, r = c[1][1], c[1][2], L.s(T.RADIUS)
+      band(x, y, tw, h, r, y, y + h, COLORS.box)
+      drawPackList(L, x + L.s(14), tw - 2 * L.s(14), v.packSel, ctx)
     elseif v.noPack and c[1] then   -- armed without a chosen pack: a warning sign instead of the %
       drawTile(L, c[1][1], y, c[1][2], h, {
         title = "NO PACK", level = 1,
@@ -259,6 +263,7 @@ return function(K)
         end,
         sub2 = "No battery warnings" })
     end
+    if not (v.packSel and c[1]) then ctx.marqueeRow = nil end   -- next selection starts its marquee anew
     if g and c[2] then drawTile(L, c[2][1], y, c[2][2], h, homeTile(L, g, ctx)) end
     if l and c[3] then
       local unknown = l.sensLimit == 0   -- unknown link mode: no range, a warning as on the other pages

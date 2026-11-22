@@ -453,7 +453,9 @@ return function(K)
   end
 
   function HZ.page(ctx, L, z, v)
-    if not v.gps then return false end   -- the widget draws its own page
+    -- The widget draws its own page: without GPS, and while the pack selection
+    -- is open (too narrow here, the compass page gives it the full column).
+    if not v.gps or v.packSel then return false end
     COLORS, U = K.COLORS, K.U
     L.hero = L.f.hero   -- big values as on the compass page
     local w = ctx.w
@@ -468,6 +470,7 @@ return function(K)
       local x = L.x(18)
       K.drawNoPack(L, x, L.x(HZ.X0) - L.x(26) - x)
     end
+    ctx.marqueeRow = nil   -- next selection starts its marquee anew
     HZ.sats(L, v.gps)
     HZ.middle(L, v.gps, ctx)
     if v.link and on.link ~= false then HZ.link(L, z, v.link, w.linkUp) end
