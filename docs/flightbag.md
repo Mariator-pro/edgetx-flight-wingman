@@ -364,10 +364,10 @@ What the widgets show, and the language of Flight Bag. The shared rows on top ap
 
 | Row | Notes |
 |---|---|
-| **Mascot** | The character on the waiting page, `Quad` (default) or `Scout`. |
+| **Mascot** | The character on the waiting page, `Quad` (default) or `Scout`; `Model image` shows the model's own image from the EdgeTX model settings instead (the Quad if the model has none). |
 | **Page style** | The look of the flight page for every model set to `Global` (a model can have its own under **Models → Show in Wingman**): `Compass` (default), `Horizon` (large artificial horizon from the flight controller's pitch and roll) or `Tiles` (three large tiles for a quick glance, also on the preflight page: battery, home arrow and range fill up and turn yellow or red). The horizon follows the model smoothly only with **Telem Ratio** 1:4 or faster in the ExpressLRS Lua script (with `Std` it moves only every few seconds). |
 | **Bar style** | For every model set to `Global` (a model can have its own under **Models → Show in Wingman**): how the battery, link and LQ bars (with `Tiles`: the fill of the tiles) look on the flight and preflight pages: `Solid` (default, one bar with marks at the thresholds), `Segments` (20 blocks, empty blocks in a warning range tinted yellow or red) or `Zones` (a thinner bar with a strip below it showing the warning ranges and a pointer at the current value). |
-| **Switch page** | `On` (default): on the waiting page, hold the aileron stick right for a second to see every switch of the radio with its channel, the flight modes it switches on in Betaflight or INAV (read from the flight controller at each connection and kept per model) and the special functions on each position; hold it left to go back. `Off` hides the page and skips the reading. |
+| **Switch page** | `On` (default): on the waiting page, pick `Switches` in the menu with the elevator and hold the aileron stick right for a second to see every switch of the radio with its channel, the flight modes it switches on in Betaflight or INAV (read from the flight controller at each connection and kept per model) and the special functions on each position; hold it left to go back. `Off` hides the page and skips the reading. |
 
 The preflight page, which only `Tiles` changes:
 

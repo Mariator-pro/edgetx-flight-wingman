@@ -55,9 +55,9 @@ return function(K)
     for yy = math.max(ya, y + h - r), yb - 1 do row(yy, yy - (y + h - r) + 0.5) end
   end
 
-  -- Colour of a level as { r, g, b }: accent, warning or critical.
+  -- Colour of a level as { r, g, b }: ok, warning or critical.
   local function levelRGB(level)
-    return (level == 2 and CRIT_RGB) or (level == 1 and WARN_RGB) or COLORS.rgb.accent
+    return (level == 2 and CRIT_RGB) or (level == 1 and WARN_RGB) or COLORS.rgb.ok
   end
 
   -- Threshold zone a value lies in: the mark's { r, g, b }, nil outside. Low marks
@@ -142,7 +142,7 @@ return function(K)
     band(x, y, w, h, r, y, y + h, crit and CRIT_COL or COLORS.box)
     if t.pct and not crit then drawFill(L, x, y, w, h, r, t.pct, levelRGB(t.level), t.marks or {}, t.high, t.outer) end
     local fg, muted = crit and T.WHITE or COLORS.fg, crit and T.WHITE or COLORS.muted
-    local stage = crit and T.WHITE or (t.level == 1 and WARN_COL) or (t.level == 0 and COLORS.accent) or COLORS.fg
+    local stage = crit and T.WHITE or (t.level == 1 and WARN_COL) or (t.level == 0 and COLORS.ok) or COLORS.fg
     local pad, cx = L.s(20), x + math.floor(w / 2)
     dtext(x + pad, y + L.s(14), cutText(t.title, "", w - 2 * pad, BOLD), muted, BOLD)
     -- two lines at the bottom, the big value centred in the room above them
@@ -280,7 +280,7 @@ return function(K)
   local function drawReady(L, z, st, secs, total)
     local x, y = L.x(T.MARGIN), L.y(T.READY_TOP)
     local w, h = z.w - 2 * x, L.y(T.READY_BOTTOM) - y
-    fillRounded(x, y, w, h, L.s(T.RADIUS), (st.ready == "GO") and COLORS.accent or WARN_COL)
+    fillRounded(x, y, w, h, L.s(T.RADIUS), (st.ready == "GO") and COLORS.ok or WARN_COL)
     local f, pad = L.f.ready, L.x(28)
     local fh = fontH(f)
     dtext(x + pad, y + math.floor((h - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5), st.ready, DARK_TEXT, f)

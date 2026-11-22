@@ -12,7 +12,8 @@
 
 return {
   fields = {
-    mascot     = { label = "Maskottchen", hint = "Figur auf der Warteseite" },
+    mascot     = { label = "Maskottchen", hint = "Figur oder Modellbild auf der Warteseite",
+                   choices = { model = "Modellbild" } },
     flightTime = { label = "Flugzeit", hint = "Zeit neben dem Akku-% im Flug",
                    choices = { timer = "EdgeTX-Timer 1", timeleft = "Restzeit-Timer" } },
     gpsView    = { label = "Seitenstil", hint = 'Flug-Seite: Kompass, Horizont ("Telem Ratio" ab 1:4) oder Kacheln',

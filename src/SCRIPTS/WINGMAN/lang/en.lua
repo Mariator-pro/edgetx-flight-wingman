@@ -12,8 +12,8 @@
 
 return {
   fields = {
-    mascot     = { label = "Mascot", hint = "Character on the wait page",
-                   choices = { quad = "Quad", scout = "Scout" } },
+    mascot     = { label = "Mascot", hint = "Character or the model image on the wait page",
+                   choices = { quad = "Quad", scout = "Scout", model = "Model image" } },
     flightTime = { label = "Flight time", hint = "Time shown beside the battery % in flight",
                    choices = { timer = "EdgeTX Timer 1", timeleft = "Remaining Timer" } },
     gpsView    = { label = "Page style", hint = "Flight page: compass, horizon (Telem Ratio 1:4 or faster) or tiles",

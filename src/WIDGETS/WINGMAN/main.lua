@@ -31,8 +31,11 @@ local function mixRGB(a, b, t)
   return lcd.RGB(m(1), m(2), m(3))
 end
 
-local DARK_RGB  = { panel = { 18, 20, 18 }, track = { 55, 58, 55 }, accent = { 124, 210, 48 }, box = { 27, 30, 27 } }
-local LIGHT_RGB = { track = { 200, 200, 205 }, accent = { 1, 152, 8 }, box = { 200, 200, 205 } }
+-- accent: titles, selection, gestures, mascot (the Accent option replaces it);
+-- ok: a value that is fine (always the palette's green).
+local DARK_RGB  = { panel = { 18, 20, 18 }, track = { 55, 58, 55 }, accent = { 124, 210, 48 }, ok = { 124, 210, 48 },
+                    box = { 27, 30, 27 } }
+local LIGHT_RGB = { track = { 200, 200, 205 }, accent = { 1, 152, 8 }, ok = { 1, 152, 8 }, box = { 200, 200, 205 } }
 local DARK = {
   transparent = false,
   panel  = rgb(DARK_RGB.panel),
@@ -40,6 +43,7 @@ local DARK = {
   muted  = lcd.RGB(150, 150, 150),
   track  = rgb(DARK_RGB.track),
   accent = rgb(DARK_RGB.accent),
+  ok     = rgb(DARK_RGB.ok),
   rgb    = DARK_RGB,
   disk   = lcd.RGB( 22,  25,  22),   -- map background
   trail  = lcd.RGB( 60,  96,  30),   -- flight track, accent at 40 %
@@ -58,6 +62,7 @@ local LIGHT = {
   muted  = lcd.RGB( 90,  90,  90),
   track  = rgb(LIGHT_RGB.track),
   accent = rgb(LIGHT_RGB.accent),
+  ok     = rgb(LIGHT_RGB.ok),
   rgb    = LIGHT_RGB,
   trail  = lcd.RGB(130, 200, 120),
   box    = rgb(LIGHT_RGB.box),
@@ -74,6 +79,42 @@ local WARN_RGB, CRIT_RGB = { 255, 180, 0 }, { 220, 40, 40 }
 local WARN_COL, CRIT_COL = rgb(WARN_RGB), rgb(CRIT_RGB)
 
 local COLORS = DARK
+
+-- Quad mascot: camera mount and the strap's top, shades of the accent.
+DARK.tpu, DARK.strapTop = lcd.RGB(90, 160, 32), lcd.RGB(155, 224, 90)
+LIGHT.tpu, LIGHT.strapTop = DARK.tpu, DARK.strapTop
+
+-- Shades worked out from the accent when the Accent option replaces it:
+-- { colour, mixed towards, share } (the fixed ones above are about the same
+-- mixes of the palette green).
+local WHITE_RGB, BLACK_RGB = { 255, 255, 255 }, { 0, 0, 0 }
+local MASCOT_SHADES = { { "tpu", BLACK_RGB, 0.27 }, { "strapTop", WHITE_RGB, 0.25 } }
+DARK.shades  = { { "trail", DARK_RGB.panel, 0.6 }, { "disc", DARK_RGB.panel, 0.7 }, table.unpack(MASCOT_SHADES) }
+LIGHT.shades = { { "trail", WHITE_RGB, 0.5 }, { "disc", WHITE_RGB, 0.75 }, { "head", WHITE_RGB, 0.8 },
+                 table.unpack(MASCOT_SHADES) }
+
+-- The palette with the accent from the Accent option: 2 the EdgeTX theme's
+-- focus colour, 3 the AccentColor picker (lcd.getColor turns a theme index into
+-- RGB). The copy is kept until the colour changes, so drawings kept per
+-- palette stay valid. Default or no colour: the palette itself.
+local accented = {}
+local function withAccent(base, opt, custom)
+  local c
+  if opt == 2 and lcd.getColor then c = lcd.getColor(COLOR_THEME_FOCUS)
+  elseif opt == 3 and custom then c = lcd.getColor and lcd.getColor(custom) or custom end
+  if type(c) ~= "number" then return base end
+  local kept = accented[base]
+  if kept and kept.c == c then return kept.pal end
+  local v = (c >> 16) & 0xFFFF   -- RGB565 in the upper half
+  local a = { (v & 0xF800) >> 8, (v & 0x07E0) >> 3, (v & 0x1F) << 3 }
+  local pal, prgb = {}, {}
+  for k, x in pairs(base) do pal[k] = x end
+  for k, x in pairs(base.rgb) do prgb[k] = x end
+  prgb.accent, pal.rgb, pal.accent = a, prgb, rgb(a)
+  for _, sh in ipairs(base.shades) do pal[sh[1]] = mixRGB(a, sh[2], sh[3]) end
+  accented[base] = { c = c, pal = pal }
+  return pal
+end
 
 -- ---------------------------------------------------------------------------
 -- Text helpers. Widths are cached; the cache is cleared at 200 entries so live
@@ -169,7 +210,7 @@ local function drawTxBattery(x, y, w, h, pct)
   lcd.drawRectangle(x, y, bw, h, COLORS.fg)
   lcd.drawFilledRectangle(x + bw, y + math.floor(h / 4), tipW, h - 2 * math.floor(h / 4), COLORS.fg)
   if pct then
-    local col = (pct > 30) and COLORS.accent or ((pct > 10) and WARN_COL or CRIT_COL)
+    local col = (pct > 30) and COLORS.ok or ((pct > 10) and WARN_COL or CRIT_COL)
     local fw = math.floor((bw - 4) * pct / 100 + 0.5)
     if fw > 0 then lcd.drawFilledRectangle(x + 2, y + 2, fw, h - 4, col) end
   end
@@ -257,13 +298,14 @@ end
 -- while the gesture is armed (o.armed: the stick was back in the centre) and
 -- the stick leans towards it short of the hold. Placed with the symbol centred
 -- on o.cx (default the zone's middle) or its left edge at o.x, vertically
--- centred on o.cy (default the zone's bottom). Design px for 800 wide.
+-- centred on o.cy (default the zone's bottom); o.bw and o.gap override the
+-- button width and the gap beside the symbol. Design px for 800 wide.
 -- Returns the hint's top.
 local function drawStickHint(z, o)
   local kx = z.w / 800
   local k = math.min(kx, (z.h - HDR_H) / 418)
   local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
-  local h, bw, gap, line = sc(30), math.floor(120 * kx + 0.5), sc(14), sc(2)
+  local h, bw, gap, line = sc(30), o.bw or math.floor(120 * kx + 0.5), o.gap or sc(14), sc(2)
   local r = math.max(2, sc(6))
   local left, right, hold, stick, armed = o.left, o.right, o.hold or 0, o.stick or 0, o.armed
   local y = o.cy and o.cy - math.floor(h / 2) or z.h - sc(6) - h
@@ -313,6 +355,141 @@ local function drawStickHint(z, o)
     end
   end
   return y
+end
+
+-- Wait page menu: a column of tiles on the left (icon over the name, the name
+-- alone when the tile is too low), the selected one in accent, filled from the
+-- left with the hold; the stick hint with Open at the bottom. Elevator picks,
+-- aileron held right opens. The tiles are laid out once as drawing calls (as
+-- the switch cards) while zone, entries, selection and palette stay; per frame
+-- only the hold fill and the stick hint are worked out. menuLayout gives the
+-- layout (its width for the page beside it), drawMenu draws it. Design px for
+-- 800 x 480.
+local MENU_LABEL = { review = "Last flight", switches = "Switches", channels = "Channels" }
+local function menuIcon(key, cx, cy, s, col, ops)
+  local rect, circ, fcirc, line = rec(ops, lcd.drawFilledRectangle), rec(ops, lcd.drawCircle),
+                                   rec(ops, lcd.drawFilledCircle), rec(ops, lcd.drawLine)
+  local r = math.floor(s / 2)
+  local t = math.max(1, math.floor(s / 14))
+  if key == "review" then   -- clock
+    for i = 0, t do circ(cx, cy, r - i, col) end
+    local hl = math.floor(r * 0.6)
+    rect(cx - math.floor(t / 2), cy - hl, t + 1, hl + 1, col)
+    rect(cx, cy - math.floor(t / 2), math.floor(r * 0.45), t + 1, col)
+  elseif key == "switches" then   -- toggle: base, lever, knob
+    local bw, bh = math.floor(s * 0.7), math.max(3, math.floor(s * 0.22))
+    local by = cy + r - bh
+    rect(cx - math.floor(bw / 2), by, bw, bh, col)
+    local kr = math.max(2, math.floor(s * 0.14))
+    local kx, ky = cx - math.floor(s * 0.22), cy - r + kr
+    for i = -t, t do line(cx + i, by, kx + i, ky, SOLID, col) end
+    fcirc(kx, ky, kr, col)
+  else   -- channels: bars up and down from a centre line
+    local bw = math.max(2, math.floor(s / 7))
+    local g = math.max(1, math.floor(bw * 0.6))
+    local x = cx - math.floor((4 * bw + 3 * g) / 2)
+    rect(cx - r, cy, s, 1, COLORS.muted)
+    for i, f in ipairs({ -0.9, 0.6, -0.5, 0.35 }) do
+      local bh = math.max(1, math.floor(r * math.abs(f)))
+      rect(x + (i - 1) * (bw + g), f < 0 and cy - bh or cy + 1, bw, bh, col)
+    end
+  end
+end
+
+local menuLay
+-- The column's inner width from all entries, so the page beside it stays put
+-- when an entry or the whole menu is not offered.
+local function menuInner(z, k, sc)
+  local lw = 0
+  for _, label in pairs(MENU_LABEL) do lw = math.max(lw, textW(label, SMLSIZE)) end
+  return math.max(lw + sc(16), sc(30) + sc(8) + textW("Open", SMLSIZE) + sc(48), math.floor(86 * k + 0.5))
+end
+
+-- Width of the column and its line: kept free on the wait page also without a menu.
+local function menuWidth(z)
+  local k = math.min(z.w / 800, (z.h - HDR_H) / 418)
+  local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
+  return menuInner(z, k, sc) + 2 * sc(12) + sc(2)
+end
+
+local function layoutMenu(z, hint, key)
+  local k = math.min(z.w / 800, (z.h - HDR_H) / 418)
+  local function sc(v) return math.max(1, math.floor(v * k + 0.5)) end
+  local pad, gap, line, hgap = sc(12), sc(10), sc(2), sc(8)
+  local bw = textW("Open", SMLSIZE) + sc(48)
+  local inner = menuInner(z, k, sc)
+  local lay = { key = key, colors = COLORS, pad = pad, bw = bw, hgap = hgap, width = inner + 2 * pad + line,
+                bg = {}, fg = {} }
+  local bg, fg = lay.bg, lay.fg
+  rec(bg, lcd.drawFilledRectangle)(inner + 2 * pad, HDR_H, line, z.h - HDR_H, COLORS.track)
+  local n = #hint.items
+  -- room for a triangle above and below the entries (as on the pack selection)
+  local triW, triH, triGap = sc(12), sc(7), sc(3)
+  local top = HDR_H + pad + triH + triGap
+  local hintY = z.h - sc(6) - sc(30)   -- the stick hint's top (drawStickHint)
+  local th = math.min(math.floor(86 * k + 0.5),
+                      math.floor((hintY - pad - triH - triGap - top - (n - 1) * gap) / n))
+  local fh, is = fontH(SMLSIZE), sc(34)
+  local icon = th >= fh + is + sc(18)
+  local r = math.max(2, sc(8))
+  local cx = pad + math.floor(inner / 2)
+  lay.tri = { cx = cx, w = triW, h = triH, up = HDR_H + pad, down = top + n * th + (n - 1) * gap + triGap,
+              amp = math.min(sc(3), pad - 1), sel = hint.sel, n = n }
+  for i, item in ipairs(hint.items) do
+    local y = top + (i - 1) * (th + gap)
+    local sel = i == hint.sel
+    local col = sel and COLORS.accent or COLORS.fg
+    fillRounded(pad, y, inner, th, r, sel and COLORS.accent or COLORS.track, bg)
+    fillRounded(pad + line, y + line, inner - 2 * line, th - 2 * line, math.max(1, r - line), COLORS.box, bg)
+    if sel then lay.fill = { pad + line, y + line, inner - 2 * line, th - 2 * line } end
+    if icon then
+      local cy = y + math.floor((th - is - sc(6) - fh) / 2)
+      menuIcon(item, cx, cy + math.floor(is / 2), is, col, fg)
+      dtext(cx, cy + is + sc(6), MENU_LABEL[item], col, SMLSIZE + CENTER, fg)
+    else
+      dtext(cx, y + math.floor(th / 2), MENU_LABEL[item], col, SMLSIZE + CENTER + VCENTER, fg)
+    end
+  end
+  return lay
+end
+
+local function menuLayout(z, hint)
+  local key = z.w .. "|" .. z.h .. "|" .. table.concat(hint.items, ",") .. "|" .. hint.sel
+  local lay = menuLay
+  if not lay or lay.key ~= key or lay.colors ~= COLORS then
+    lay = layoutMenu(z, hint, key)
+    menuLay = lay
+  end
+  return lay
+end
+
+local function drawMenu(z, w, lay)
+  local unpack = table.unpack
+  for _, o in ipairs(lay.bg) do o[1](unpack(o, 2)) end
+  local f = lay.fill
+  local fw = f and math.floor(f[3] * math.max(0, math.min(1, w.waitHold or 0))) or 0
+  if fw > 0 then lcd.drawFilledRectangle(f[1], f[2], fw, f[4], COLORS.trail) end
+  for _, o in ipairs(lay.fg) do o[1](unpack(o, 2)) end
+  -- A triangle above and below while the selection can move that way: accent
+  -- while the elevator leans that way, nudging until the step counts.
+  local t = lay.tri
+  local hw = math.floor(t.w / 2)
+  for dir = -1, 1, 2 do   -- -1 up, 1 down
+    if dir < 0 and t.sel > 1 or dir > 0 and t.sel < t.n then
+      local lean = -dir * (w.stickEle or 0) > 0.05   -- elevator up (positive) moves the selection up
+      local d = (lean and w.eleArmed) and dir * nudge(t.amp) or 0
+      local col = lean and COLORS.accent or COLORS.muted
+      if dir < 0 then
+        local ty = t.up + d
+        fillTri(t.cx - hw, ty + t.h, t.cx + hw, ty + t.h, t.cx, ty, col)
+      else
+        local ty = t.down + d
+        fillTri(t.cx - hw, ty, t.cx + hw, ty, t.cx, ty + t.h, col)
+      end
+    end
+  end
+  drawStickHint(z, { right = "Open", x = lay.pad, bw = lay.bw, gap = lay.hgap, hold = w.waitHold,
+                     stick = w.stick, ele = w.stickEle, armed = w.closeArmed })
 end
 
 -- Flight mode field and ARMED field on fixed slots: the mode
@@ -681,7 +858,7 @@ local FONTS_STD = { hero = DBLSIZE, unit = 0, cap = SMLSIZE, label = TINSIZE or 
 local STAGE_COL = { [1] = WARN_COL, [2] = CRIT_COL }
 -- Colour from a core's level (0 ok, 1 warning, 2 critical): big values and
 -- status green, yellow or red; small values text colour, yellow or red.
-local function levelCol(lvl) return (lvl == nil) and COLORS.fg or STAGE_COL[lvl] or COLORS.accent end   -- no level: neutral
+local function levelCol(lvl) return (lvl == nil) and COLORS.fg or STAGE_COL[lvl] or COLORS.ok end   -- no level: neutral
 local function smallCol(lvl) return STAGE_COL[lvl] or COLORS.fg end
 
 -- Layout context: x from the 800 px design, y from the 418 px body, sizes by the smaller factor.
@@ -803,7 +980,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   dtext(dx, dy, sec, COLORS.fg, dirF)
   dtext(dx + textW(sec, dirF), dy, deg, COLORS.muted, dirF)
   lcd.drawCircle(gx, dy + cr, cr, COLORS.track)
-  drawArrow(gx, dy + cr, cr - 2, v.bearing, v.live and COLORS.accent or COLORS.muted)
+  drawArrow(gx, dy + cr, cr - 2, v.bearing, v.live and COLORS.ok or COLORS.muted)
   y = y + bh + p
 
   -- Without link the line and bar mean nothing: left out, their room kept so
@@ -857,7 +1034,7 @@ local function drawSearchInfo(ctx, v, x0, y0, pw, ph, pad)
   local hx = x + textW("POSITION ", SMLSIZE)
   dtext(x, y, "POSITION ", COLORS.muted, SMLSIZE)
   if v.live then
-    dtext(hx, y, "live", COLORS.accent, SMLSIZE)
+    dtext(hx, y, "live", COLORS.ok, SMLSIZE)
   else   -- the age goes below the position when it does not fit beside the heading
     local age = fmtAge(v.ageS or 0)
     if hx + textW(age, SMLSIZE) <= right then dtext(hx, y, age, WARN_COL, SMLSIZE)
@@ -1010,7 +1187,7 @@ local function drawStage(L, x, right, stage, y)
   local f, pad = L.f.stage, L.s(8)
   local ww, wh = textW(word, f) + 2 * pad, fontH(f)
   local wx, wy = right and x - ww or x, L.y(y)
-  fillRounded(wx, wy, ww, wh, L.s(4), STAGE_COL[stage] or COLORS.accent)
+  fillRounded(wx, wy, ww, wh, L.s(4), STAGE_COL[stage] or COLORS.ok)
   dtext(wx + pad, wy, word, (stage == 2) and WHITE or DARK_TEXT, f)
 end
 
@@ -1073,12 +1250,12 @@ end
 local RESERVE_TRACK = 0.6   -- share of the track in the mix
 local STAGE_RGB = { [1] = WARN_RGB, [2] = CRIT_RGB }
 local function reserveColor(stage)
-  return mixRGB(STAGE_RGB[stage] or COLORS.rgb.accent, COLORS.rgb.track, RESERVE_TRACK)
+  return mixRGB(STAGE_RGB[stage] or COLORS.rgb.ok, COLORS.rgb.track, RESERVE_TRACK)
 end
 
 local function drawLink(L, x, w, l, linkUp)
   local right = x + w
-  local col = STAGE_COL[l.stage] or COLORS.accent
+  local col = STAGE_COL[l.stage] or COLORS.ok
   drawTitle(L, x, l.modLine)
   -- Heartbeat top right, centred on the title square, while packets arrive.
   if linkUp then drawHeartbeat(right - HEARTBEAT_R, L.y(21) + math.floor(L.s(11) / 2)) end
@@ -1531,7 +1708,7 @@ do
   local function drawReady(L, z, top, p, st, counting)
     local bw, bh = L.x(READY_W), L.s(READY_H)
     local bx, by = L.x(18), top + math.floor((z.h - top - bh) / 2)
-    fillRounded(bx, by, bw, bh, L.s(10), (st.ready == "GO") and COLORS.accent or WARN_COL)
+    fillRounded(bx, by, bw, bh, L.s(10), (st.ready == "GO") and COLORS.ok or WARN_COL)
     local f = L.f.ready
     local fh = fontH(f)
     dtext(bx + math.floor(bw / 2), by + math.floor((bh - fh * CAP_H) / 2 - fh * CAP_TOP + 0.5), st.ready,
@@ -1719,7 +1896,9 @@ end
 -- Wait page: a mascot while no telemetry arrives, chosen in the settings tool
 -- (Display): "Quad", a quad seen slightly from above (the camera is its face,
 -- props as discs), or "Scout", a round head; both with an antenna sending signal
--- arcs. With a setup error the mascot is sad, next to a yellow speech bubble.
+-- arcs. "Model image" shows the model's own image from the model settings
+-- instead (the quad without one). With a setup error the mascot is sad, next to
+-- a yellow speech bubble.
 -- Mascots drawn in a 150 x 122 design box, scaled with the page; animation from
 -- getTime() (rocks on its foot, props spin, arcs pulse outwards, red tip pulses
 -- like the heartbeat, eyes blink and now and then look ahead). The API cannot rotate
@@ -1744,10 +1923,8 @@ do
   -- Quad parts, same in Dark and Light.
   local CARBON    = lcd.RGB( 38,  38,  38)
   local PLATE     = lcd.RGB( 42,  42,  42)
-  local TPU       = lcd.RGB( 90, 160,  32)
   local BATT      = lcd.RGB(240, 192,  32)
   local BATT_TOP  = lcd.RGB(246, 216,  96)
-  local STRAP_TOP = lcd.RGB(155, 224,  90)
   local LENS      = lcd.RGB( 28,  47,  69)
 
   -- Props: centre, radii, blade angle, turning direction (diagonal pairs alike).
@@ -1777,11 +1954,13 @@ do
   local function drawScout(mx, my, k, t, sad)
     local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
     local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
-    -- Design point rotated about the pivot (positive = clockwise), in pixels.
+    -- Design point rotated about the pivot (positive = clockwise), in pixels;
+    -- the constant part worked out once per frame (P runs a few hundred times).
+    local floor, ck, sk = math.floor, c * k, sn * k
+    local ax = mx + (PIVOT_U - PIVOT_U * c + PIVOT_V * sn) * k + 0.5
+    local ay = my + (PIVOT_V - PIVOT_U * sn - PIVOT_V * c) * k + 0.5
     local function P(u, v)
-      local du, dv = u - PIVOT_U, v - PIVOT_V
-      return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
-             math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
+      return floor(ax + u * ck - v * sk), floor(ay + u * sk + v * ck)
     end
     local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
     local function rect(u, v, w, h, col)
@@ -1874,11 +2053,13 @@ do
   local function drawQuad(mx, my, k, t, sad)
     local deg = ROCK_DEG * math.sin(2 * math.pi * (t % ROCK_T) / ROCK_T)
     local c, sn = math.cos(math.rad(deg)), math.sin(math.rad(deg))
-    -- Design point rotated about the pivot (positive = clockwise), in pixels.
+    -- Design point rotated about the pivot (positive = clockwise), in pixels;
+    -- the constant part worked out once per frame (P runs a few hundred times).
+    local floor, ck, sk = math.floor, c * k, sn * k
+    local ax = mx + (PIVOT_U - PIVOT_U * c + PIVOT_V * sn) * k + 0.5
+    local ay = my + (PIVOT_V - PIVOT_U * sn - PIVOT_V * c) * k + 0.5
     local function P(u, v)
-      local du, dv = u - PIVOT_U, v - PIVOT_V
-      return math.floor(mx + (PIVOT_U + du * c - dv * sn) * k + 0.5),
-             math.floor(my + (PIVOT_V + du * sn + dv * c) * k + 0.5)
+      return floor(ax + u * ck - v * sk), floor(ay + u * sk + v * ck)
     end
     local function S(n) return math.max(1, math.floor(n * k + 0.5)) end
     local function quad(u1, v1, u2, v2, u3, v3, u4, v4, col)
@@ -1955,7 +2136,7 @@ do
     quad(58, 30, 92, 30, 95, 38, 55, 38, BATT_TOP)
     rect(55, 38, 40, 15, BATT)
     rect(55, 38, 40, 4, PLATE)
-    quad(72, 30, 78, 30, 79, 38, 71, 38, STRAP_TOP)
+    quad(72, 30, 78, 30, 79, 38, 71, 38, COLORS.strapTop)
     rect(71, 38, 8, 15, COLORS.accent)
 
     -- Antenna from the battery, arcs around its tip.
@@ -1986,8 +2167,8 @@ do
     rect(121, 88, 14, 4, COLORS.accent)
 
     -- Camera as the face: TPU mount, accent rim, the real lens small on the forehead.
-    rect(47, 64, 5, 32, TPU)
-    rect(98, 64, 5, 32, TPU)
+    rect(47, 64, 5, 32, COLORS.tpu)
+    rect(98, 64, 5, 32, COLORS.tpu)
     rounded(51, 60, 48, 40, 9, COLORS.accent)
     rounded(54, 63, 42, 34, 7, COLORS.head)
     circle(75, 67, 1.5, LENS)
@@ -2025,7 +2206,7 @@ do
     -- Front props over the arms and the sides of the face, hubs on top.
     for _, p in ipairs(FRONT_PROPS) do
       prop(p)
-      circle(p[1], p[2], 2.5, TPU)
+      circle(p[1], p[2], 2.5, COLORS.tpu)
     end
   end
 
@@ -2062,20 +2243,52 @@ do
     end
   end
 
+  -- The model image, opened once per file name; nil when missing or not loadable.
+  local imgName, imgBmp
+  local function modelImage(name)
+    if name ~= imgName then
+      imgName, imgBmp = name, nil
+      if name and Bitmap then
+        local path = string.sub(name, 1, 1) == "/" and name or "/IMAGES/" .. name
+        local ok, bmp = pcall(Bitmap.open, path)
+        if ok and bmp and Bitmap.getSize(bmp) > 0 then imgBmp = bmp end
+      end
+    end
+    return imgBmp
+  end
+
+  -- Model image in the mascot's place: as high as the mascot, at most 1.6 times
+  -- as wide as high, centred on cx.
+  local function drawImage(bmp, cx, my, k)
+    local iw, ih = Bitmap.getSize(bmp)
+    local bh = 122 * k
+    local scale = math.min(bh / ih, 1.6 * bh / iw)
+    local pct = math.floor(scale * 100)
+    local dw, dh = math.floor(iw * pct / 100), math.floor(ih * pct / 100)
+    lcd.drawBitmap(bmp, cx - math.floor(dw / 2), my + math.floor((bh - dh) / 2), pct)
+  end
+
   function drawWait(ctx)
     local z = ctx.zone
     local bodyH = z.h - HDR_H
     if bodyH < 6 * fontH(SMLSIZE) then return end
     if ctx.w and ctx.w.setupError then return drawBubble(z, bodyH, mascot(ctx.w), ERR_TITLE, ERR_LINES) end
     local th, sh = fontH(BOLD), fontH(SMLSIZE)
-    -- Designed for 480 x 272.
-    local k = math.min(bodyH / 227, z.w / 480)
+    -- Menu on the left (while one is offered), the rest centred beside it; its
+    -- place stays free without a menu (model connected), so nothing moves.
+    local hint = ctx.w and ctx.w.waitHint
+    local menu = hint and hint.items and menuLayout(z, hint)
+    local railW = menuWidth(z)
+    -- Designed for 480 x 272; beside the menu only the mascot (150 wide plus
+    -- margins) has to fit, so the menu does not shrink it.
+    local k = math.min(bodyH / 227, z.w / 480, (z.w - railW) / 190)
     local t = getTime()
     local gap = math.floor(10 * k + 0.5)
     local blockH = math.floor(122 * k + 0.5) + gap + th + sh
-    local cx = math.floor(z.w / 2)
+    local cx = railW + math.floor((z.w - railW) / 2)
     local my = HDR_H + math.floor((bodyH - blockH) / 2)
-    mascot(ctx.w)(cx - 75 * k, my, k, t)
+    local bmp = ctx.w and ctx.w.mascot == "model" and modelImage(ctx.w.modelImage)
+    if bmp then drawImage(bmp, cx, my, k) else mascot(ctx.w)(cx - 75 * k, my, k, t) end
 
     -- Title with dots counting up; left edge fixed so the text does not jump.
     local ty = my + math.floor(122 * k + 0.5) + gap
@@ -2083,13 +2296,7 @@ do
     local tx = cx - math.floor(textW(title .. "...", BOLD) / 2)
     dtext(tx, ty, title .. string.rep(".", math.floor(t / 50) % 4), COLORS.fg, BOLD)
     dtext(cx, ty + th, (ctx.w and ctx.w.waitSub) or WAIT_SUB, COLORS.muted, SMLSIZE + CENTER)
-
-    -- Gestures: the last summary (while one is kept) and the switch page.
-    local hint = ctx.w and ctx.w.waitHint
-    if hint then
-      drawStickHint(z, { left = hint.review and "Last flight" or nil, right = hint.switches and "Switches" or nil,
-                         hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
-    end
+    if menu then drawMenu(z, ctx.w, menu) end
   end
 end
 
@@ -2245,6 +2452,57 @@ do
   end
 end
 
+-- Channel page: the channels with mixes as bars from the centre (-100 to
+-- +100 %), number, name and value; two columns from five channels on, as many
+-- rows as fit. Bottom right the gesture back.
+local function drawChannels(ctx)
+  local z, v = ctx.zone, ctx.w.ch
+  if z.h - HDR_H < 8 * fontH(SMLSIZE) then return end
+  local L = flightLayout(z)
+  local x0, right = L.x(18), z.w - L.x(18)
+  drawTitle(L, x0, "CHANNELS")
+  local hintY = drawStickHint(z, { left = "Back", hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
+  local rows = v.rows
+  local top, bottom = L.y(50), hintY - L.s(12)
+  if #rows == 0 then
+    dtext(math.floor(z.w / 2), math.floor((top + bottom) / 2), "No channel has a mix", COLORS.muted, SMLSIZE + CENTER + VCENTER)
+    return
+  end
+  local fh = fontH(SMLSIZE)
+  local cols = #rows > 4 and 2 or 1
+  local per = math.min(math.ceil(#rows / cols), math.max(1, math.floor((bottom - top) / (fh + L.s(4)))))
+  local rh = math.min(L.s(44), math.floor((bottom - top) / per))
+  local cgap = L.x(40)
+  local cw = math.floor((right - x0 - (cols - 1) * cgap) / cols)
+  local numW, nameW = textW("CH32", SMLSIZE), 0
+  for _, r in ipairs(rows) do
+    if r.name ~= "" then nameW = math.max(nameW, textW(r.name, SMLSIZE)) end
+  end
+  local valW, tg = textW("-150%", SMLSIZE), L.x(10)
+  local barH = math.max(4, math.floor(rh * 0.35))
+  for i = 1, math.min(#rows, cols * per) do
+    local r = rows[i]
+    local c = math.floor((i - 1) / per)
+    local x, cy = x0 + c * (cw + cgap), top + ((i - 1) % per) * rh + math.floor(rh / 2)
+    dtext(x, cy, "CH" .. r.n, COLORS.muted, SMLSIZE + VCENTER)
+    local nx = x + numW + tg
+    if r.name ~= "" then dtext(nx, cy, r.name, COLORS.fg, SMLSIZE + VCENTER) end
+    local bx = nx + (nameW > 0 and nameW + tg or 0)
+    local bwid = x + cw - valW - tg - bx
+    local pct = (r.v or 0) * 100 / 1024
+    local p = math.floor(math.abs(pct) + 0.5)
+    local val = (pct < 0 and p > 0 and "-" or "") .. p .. "%"
+    dtext(x + cw - textW(val, SMLSIZE), cy, val, COLORS.fg, SMLSIZE + VCENTER)
+    if bwid >= 20 then
+      local by, mid = cy - math.floor(barH / 2), bx + math.floor(bwid / 2)
+      lcd.drawFilledRectangle(bx, by, bwid, barH, COLORS.track)
+      local fw = math.floor(bwid / 2 * math.min(1, math.abs(pct) / 100) + 0.5)
+      if fw > 0 then lcd.drawFilledRectangle(pct < 0 and mid - fw or mid, by, fw, barH, COLORS.accent) end
+      lcd.drawFilledRectangle(mid, by - L.s(3), 1, barH + 2 * L.s(3), COLORS.fg)
+    end
+  end
+end
+
 -- Wingman's own core missing or failing: say so instead of an empty page.
 -- Without the Wingman core: the same tile text as the sibling widgets.
 local function drawNoCore(ctx)
@@ -2292,7 +2550,7 @@ end
 
 local function refresh(ctx, event, touchState)
   background(ctx)   -- background() does not run while the widget is visible
-  COLORS = (ctx.options.Theme == 2) and LIGHT or DARK
+  COLORS = withAccent((ctx.options.Theme == 2) and LIGHT or DARK, ctx.options.Accent, ctx.options.AccentColor)
   NORTH_UP = (ctx.options.Compass == 2)
   BAR.style = ctx.w and ctx.w.barStyle or "solid"
   U = (ctx.w and ctx.w.imperial) and UNITS.imperial or UNITS.metric
@@ -2310,7 +2568,7 @@ local function refresh(ctx, event, touchState)
   end
 
   local w = ctx.w
-  local page = (not w and drawNoCore) or (ctx.fatalError and drawFatal) or (w.setupError and drawWait) or (w.sw and drawSwitches) or (w and w.flight and drawFlight) or (w and w.pre and drawPre)
+  local page = (not w and drawNoCore) or (ctx.fatalError and drawFatal) or (w.setupError and drawWait) or (w.sw and drawSwitches) or (w.ch and drawChannels) or (w and w.flight and drawFlight) or (w and w.pre and drawPre)
                or (w and w.search and drawSearch) or (w and w.post and drawPost)
                or (w and w.phase == core.WAITING and drawWait) or drawSearch
   if not pcall(drawHeader, ctx) or not pcall(page, ctx) then

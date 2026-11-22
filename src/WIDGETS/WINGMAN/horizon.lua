@@ -353,7 +353,7 @@ return function(K)
   function HZ.link(L, z, l, linkUp)
     local right, bw, r = z.w - L.x(18), L.s(HZ.BAR_W), L.s(6)
     local x, top, bottom = right - bw, L.y(HZ.BAR_TOP), L.y(HZ.BAR_BOTTOM)
-    local col = STAGE_COL[l.stage] or COLORS.accent
+    local col = STAGE_COL[l.stage] or COLORS.ok
     -- heartbeat in the top right corner while packets arrive, the title right-aligned left of it
     local s, title = L.s(11), l.modLine or "--"
     local tx = right - 2 * HEARTBEAT_R - L.s(10) - textW(title, L.f.title) - s - L.s(8)

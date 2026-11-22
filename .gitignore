@@ -31,6 +31,7 @@ secrets.json
 src/MODELS
 src/RADIO
 src/LOGS
+src/IMAGES
 
 # Runtime data
 config.lua

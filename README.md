@@ -58,7 +58,8 @@ Three widgets side by side share a small screen, yet each phase of a flight need
 - **All warnings stay as they are:** the voice announcements and vibration of the three projects keep running, even when the widget is not on screen. Flight Wingman adds no voice or vibration warnings of its own.
 - **One ready check before take-off:** `GO` when battery, link and GPS are fine and the flight controller allows arming, otherwise `CHECK` with the reason (Betaflight from 2025.12 and INAV name the arming block in plain text). With GPS, it also tells you when the failsafe would not fly the model home (`Failsafe: drop`) or when Betaflight's GPS Rescue still needs more satellites (`GPS Rescue: 6 of 8 sats`).
 - **Setup errors show up before you fly:** a missing core, an unconfigured model or a missing sensor keeps the waiting page with a hint, instead of warnings silently not playing.
-- **See what each switch does:** on the waiting page, aileron held right opens a page with every switch, its channel, the flight controller's modes and the sounds for each position (can be turned off in Flight Bag under Display).
+- **See what each switch does:** from the waiting page menu, a page with every switch, its channel, the flight controller's modes and the sounds for each position (can be turned off in Flight Bag under Display).
+- **Channel monitor:** from the waiting page menu, the model's channels as bars with name and value, like the EdgeTX channel monitor.
 - **Not every model has GPS:** battery, link and GPS can be switched off per model; the remaining columns share the width.
 
 See the pages in motion, from the ready check to warnings and the search for a crashed model: [Flight Wingman in action](docs/in-action.md).
@@ -122,7 +123,7 @@ The sound files always live under `/SOUNDS/en/SCRIPTS/`, no matter which languag
    - **Theme**: `Dark` or `Light`.
    - **Compass**: `NoseUp` (default): flight direction on top, the arrow points home. `NorthUp`: north on top like a map, a house on the ring marks home.
    - **Transparency**: how much of the radio theme shows through the milky background (light theme only): `0%` opaque, `100%` no overlay.
-   - **Accent**: color of the heading text: `Default` (green), `Theme` (the focus color of your EdgeTX theme) or `Custom` (pick any color under **AccentColor**).
+   - **Accent**: color of headings, selection, gestures and the mascot (values that are fine stay green): `Default` (green), `Theme` (the focus color of your EdgeTX theme) or `Custom` (pick any color under **AccentColor**).
 
 > ⚠️ **Don't combine Flight Wingman with the single widgets or function scripts** of Lipo Nanny, Link Sentinel or GPS Homer on the same model, otherwise every announcement plays twice. Place Flight Wingman on **one screen only**.
 
@@ -143,8 +144,7 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 - **Pack selection:** elevator moves the cursor, aileron held right for 1 s confirms. Forgot to choose a pack before arming? Disarm, and the flight page shows the selection again.
 - **Close the search page:** aileron held right for 1 s.
 - **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
-- **Show the last post-flight page again:** on the waiting page, aileron held left for 1 s.
-- **Open the switch page:** on the waiting page, aileron held right for 1 s; aileron held left goes back.
+- **Waiting page menu:** on the left edge `Last flight` (while there is one), `Switches` and `Channels`. Elevator picks an entry, aileron held right for 1 s opens it; on the switch and channel page aileron held left for 1 s goes back.
 
 ---
 

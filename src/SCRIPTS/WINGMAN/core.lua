@@ -10,7 +10,7 @@
 local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
-M.VERSION = "1.3.0"
+M.VERSION = "1.4.0"
 M.API     = { 1, 3 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
@@ -397,10 +397,14 @@ local function fmCurrent()
   return type(fm) == "string" and fm ~= ""
 end
 
--- Filename of the active model, nil when unknown.
+-- Filename of the active model, nil when unknown; second the model image's
+-- file name from the model settings (nil without one).
 local function activeModel()
   local ok, info = pcall(model.getInfo)
-  return ok and type(info) == "table" and info.filename or nil
+  if not ok or type(info) ~= "table" then return nil end
+  local img = info.bitmap
+  if type(img) ~= "string" or img == "" then img = nil end
+  return info.filename, img
 end
 
 -- Switch page: the modes the FC sent, stored per model in the config
@@ -1007,37 +1011,107 @@ local function closeSwitches(w)
     nil, nil, nil, nil, nil, nil, nil, nil
 end
 
--- Wait page gestures, aileron held a second: left reopens the last summary for
--- ENDED_HOLD_T (while one is kept), right opens the switch page (switch page
--- on); both only without a setup error; on the switch page left closes it. w.waitHold -1..1
--- (negative while held left) for the hint bar, w.waitHint the gestures offered.
+-- Channel page: the model's channels with mixes, number and name read once per
+-- opening, the output values (-1024..1024, past that with limits over 100 %)
+-- every tick.
+local function channelView(w)
+  local v = w.chView
+  if not v then
+    v = { rows = {} }
+    local count = model and model.getMixesCount
+    for i = 0, 31 do
+      if count and (count(i) or 0) > 0 then
+        local o = model.getOutput and model.getOutput(i)
+        local name = o and o.name or ""
+        v.rows[#v.rows + 1] = { n = i + 1, name = name, src = "ch" .. (i + 1) }
+      end
+    end
+    w.chView = v
+  end
+  for _, r in ipairs(v.rows) do r.v = getValue(r.src) or 0 end
+  return v
+end
+
+local function closeChannels(w)
+  w.chOpen, w.ch, w.chView = nil, nil, nil
+end
+
+-- Wait page menu, top to bottom: the last summary (while one is kept), the
+-- switch page (switch page on), the channel page; none with a setup error.
+local function waitMenu(w)
+  local items = {}
+  if w.setupError then return items end
+  if w.postKeep ~= nil then items[#items + 1] = "review" end
+  if w.switchPage and not w.swMissing then items[#items + 1] = "switches" end
+  items[#items + 1] = "channels"
+  return items
+end
+
+-- Elevator moves the menu selection one step per deflection (up: towards the
+-- top), armed again in the centre; held still while an aileron hold runs.
+-- w.waitSel keeps the entry by name. Returns its index.
+local function pollMenu(w, items)
+  local idx = 1
+  for i, k in ipairs(items) do
+    if k == w.waitSel then idx = i end
+  end
+  if not sticksFree(w) or w.closeSince then
+    w.eleArmed = false
+  else
+    local ele = w.ele or 0
+    if math.abs(ele) < CLOSE_DEAD then
+      if w.stickSeen then w.eleArmed = true end
+    elseif w.eleArmed and math.abs(ele) > CLOSE_AIL then
+      idx = math.max(1, math.min(#items, idx + (ele > 0 and -1 or 1)))
+      w.eleArmed = false
+    end
+  end
+  w.waitSel = items[idx]
+  return idx
+end
+
+-- Wait page gestures: elevator picks a menu entry, aileron held right a second
+-- opens it. The last summary stays for ENDED_HOLD_T; on the switch and channel
+-- page aileron held left a second goes back. w.waitHold 0..1 (negative while
+-- held left on a page) for the hint bar, w.waitHint the menu ({ items, sel }).
 local function waitGestures(w, now)
-  if w.switchOpen then
+  if w.switchOpen or w.chOpen then
     local hold, done = pollHold(w, now, -1)
     w.waitHold = -hold
-    if done or not w.switchPage or w.setupError then closeSwitches(w)
+    if w.switchOpen then
+      if done or not w.switchPage or w.setupError then closeSwitches(w)
+      else
+        w.sw = switchView(w)
+        if w.sw then return end
+        closeSwitches(w)
+      end
+    elseif done or w.setupError then
+      closeChannels(w)
     else
-      w.sw = switchView(w)
-      if w.sw then return end
-      closeSwitches(w)
+      w.ch = channelView(w)
+      return
     end
+    w.waitHold = 0
   end
   if w.reviewAt and now * 10 - w.reviewAt < ENDED_HOLD_T then
     w.phase, w.post = M.ENDED, w.postKeep
     return
   end
   w.reviewAt = nil
-  local review, switches = w.postKeep ~= nil and not w.setupError, w.switchPage and not w.setupError and not w.swMissing
-  if not review and not switches then return end
-  w.waitHint = { review = review, switches = switches }
-  local sign = (w.ail or 0) < 0 and -1 or 1
-  local allowed = (sign < 0 and review) or (sign > 0 and switches)
-  local hold, done = pollHold(w, now, allowed and sign or 0)
-  w.waitHold = sign * hold
-  if done and sign < 0 then
+  local items = waitMenu(w)
+  if #items == 0 then return end
+  local idx = pollMenu(w, items)
+  w.waitHint = { items = items, sel = idx }
+  local hold, done = pollHold(w, now, 1)
+  w.waitHold = hold
+  if not done then return end
+  local pick = items[idx]
+  if pick == "review" then
     w.reviewAt, w.phase, w.post = now * 10, M.ENDED, w.postKeep
-  elseif done then
+  elseif pick == "switches" then
     w.switchOpen, w.sw = true, SWITCHES_LOADING   -- the reading starts on the next tick
+  else
+    w.chOpen, w.ch = true, channelView(w)
   end
 end
 
@@ -1048,8 +1122,8 @@ end
 local function buildPages(w, on, now, connected)
   w.flight, w.pre, w.search, w.post = nil, nil, nil, nil
   w.waitTitle, w.waitSub = nil, nil
-  w.waitHold, w.waitHint, w.sw, w.preReady = nil, nil, nil, false
-  if w.phase ~= M.WAITING or w.searching then closeSwitches(w) end
+  w.waitHold, w.waitHint, w.sw, w.ch, w.preReady = nil, nil, nil, nil, false
+  if w.phase ~= M.WAITING or w.searching then closeSwitches(w); closeChannels(w) end
   local disarmed = w.lastArmed and not w.armed   -- armed -> disarmed edge
   w.lastArmed = w.armed
   if connected then
@@ -1253,9 +1327,10 @@ function M.addLevels(w)
 end
 
 -- Page data from the demo: ("flight", view), ("pre", preflight data), ("post", summary),
--- ("switches", switch page view, with "hint" the wait page's hint) or ("search", position source).
+-- ("switches", switch page view, with "hint" the wait page's menu), ("channels", channel
+-- page view) or ("search", position source).
 local function updateDemo(w, now)
-  w.search, w.flight, w.pre, w.post, w.sw, w.waitHint, w.waitHold = nil, nil, nil, nil, nil, nil, nil
+  w.search, w.flight, w.pre, w.post, w.sw, w.ch, w.waitHint, w.waitHold = nil, nil, nil, nil, nil, nil, nil, nil
   local kind, data
   -- DEMO may name the page ("flight", "search"); true takes the demo's default.
   if w.demo then kind, data = w.demo(w, now, M, type(M.DEMO) == "string" and M.DEMO or nil) end
@@ -1263,6 +1338,9 @@ local function updateDemo(w, now)
   if kind == "switches" then
     w.sw, w.waitHint, w.waitHold = data.view, data.hint, data.hold
     w.stick, w.closeArmed = data.stick or 0, true
+  end
+  if kind == "channels" then
+    w.ch, w.waitHold, w.stick, w.closeArmed = data.view, data.hold, 0, true
   end
   if kind == "post" then w.post = data end
   if kind == "pre" then
@@ -1290,7 +1368,7 @@ M.CONFIG_SCHEMA_VERSION = 1
 M.MODULES = { "lipo", "link", "gps" }
 local CONFIG_POLL = 500   -- getTime units: 5 s
 
-M.MASCOTS = { "quad", "scout" }   -- wait page character, first = default
+M.MASCOTS = { "quad", "scout", "model" }   -- wait page character or the model image, first = default
 M.FLIGHT_TIMES = { "timer", "timeleft" }   -- flight page time beside the battery %, first = default
 M.GPS_VIEWS = { "compass", "horizon", "tiles" }   -- page style, first = default
 M.BAR_STYLES = { "solid", "segments", "zones" }   -- battery, link and LQ bars, first = default
@@ -1322,7 +1400,7 @@ function M.loadConfig()
   if cfg.schemaVersion ~= M.CONFIG_SCHEMA_VERSION then return nil, "schema", tostring(cfg.schemaVersion) end
   if type(cfg.generation) ~= "number" then cfg.generation = 0 end
   if type(cfg.models) ~= "table" then cfg.models = {} end
-  if cfg.mascot ~= M.MASCOTS[2] then cfg.mascot = M.MASCOTS[1] end
+  if cfg.mascot ~= M.MASCOTS[2] and cfg.mascot ~= M.MASCOTS[3] then cfg.mascot = M.MASCOTS[1] end
   if cfg.flightTime ~= M.FLIGHT_TIMES[2] then cfg.flightTime = M.FLIGHT_TIMES[1] end
   if cfg.gpsView ~= M.GPS_VIEWS[2] and cfg.gpsView ~= M.GPS_VIEWS[3] then cfg.gpsView = M.GPS_VIEWS[1] end
   if cfg.barStyle ~= M.BAR_STYLES[2] and cfg.barStyle ~= M.BAR_STYLES[3] then cfg.barStyle = M.BAR_STYLES[1] end
@@ -1426,17 +1504,18 @@ function M.factoryReset()
   return M.saveConfig(fresh)
 end
 
--- Switches of the active model, the mascot, the flight time, page style and bar style (the model's
--- own or the one for all models), re-read
--- every 5 s (a change in the settings tool or a model switch applies without a reload). A damaged
--- file: all on, default mascot, flight time, page style and bar style. The stored modes keep their
--- table while unchanged, so the switch page is not built again on every read.
+-- Switches of the active model, the mascot (and the model image's file name), the flight
+-- time, page style and bar style (the model's own or the one for all models), re-read every
+-- 5 s (a change in the settings tool or a model switch applies without a reload). A damaged
+-- file: all on, default mascot, flight time, page style and bar style. The stored modes keep
+-- their table while unchanged, so the switch page is not built again on every read.
 local function pollModules(w, now)
   if w.on and w.onAt and now - w.onAt < CONFIG_POLL then return w.on end
   w.onAt = now
-  local cfg, file = M.loadConfig(), activeModel()
+  local cfg, file, img = M.loadConfig(), activeModel()
   w.on = M.modules(cfg, file)
   w.mascot = cfg and cfg.mascot
+  w.modelImage = img
   w.flightTime = cfg and cfg.flightTime
   w.gpsView = cfg and (M.modelSetting(cfg, file, "gpsView") or cfg.gpsView)   -- the model's own first
   w.barStyle = cfg and (M.modelSetting(cfg, file, "barStyle") or cfg.barStyle)
@@ -1600,6 +1679,7 @@ function M.tick(w, on)
   if w.setupError then
     w.phase, w.flight, w.pre, w.search, w.post, w.waitHint = M.WAITING, nil, nil, nil, nil, nil
     closeSwitches(w)
+    closeChannels(w)
     clearQr(w)
   end
   -- Finder after the setup check, so a hidden search page stays silent. Input:
