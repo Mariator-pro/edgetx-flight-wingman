@@ -144,7 +144,7 @@ Touch and keys don't reach a widget in App mode, so Flight Wingman uses the stic
 - **Pack selection:** elevator moves the cursor, aileron held right for 1 s confirms. Forgot to choose a pack before arming? Disarm, and the flight page shows the selection again.
 - **Close the search page:** aileron held right for 1 s.
 - **Mute the finder beeps:** on the search page, aileron held left for 1 s (again to unmute); each new search starts with sound.
-- **Waiting page menu:** on the left edge `Last flight` (while there is one), `Switches` and `Channels`. Elevator picks an entry, aileron held right for 1 s opens it; on the switch and channel page aileron held left for 1 s goes back.
+- **Waiting page menu:** on the left edge `Last flight` (while there is one), `Switches` and `Channels`. Elevator picks an entry, aileron held right for 1 s opens it; on the switch and channel page aileron held left for 1 s goes back (`Exit`). On radios with customisable buttons (TX15, TX16S MK3) aileron held right for 1 s on the switch page turns to the button page and back (`Buttons`, `Switches`).
 
 ---
 

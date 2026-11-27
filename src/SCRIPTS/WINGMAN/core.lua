@@ -10,7 +10,7 @@
 local M = {}
 -- Single source of the version; the settings tool reads VERSION and API as
 -- text from the head of this file (keep them near the top).
-M.VERSION = "1.4.0"
+M.VERSION = "1.4.1"
 M.API     = { 1, 3 }
 
 -- Simulator test data for the flight, preflight or search page (/SCRIPTS/WINGMAN/demo.lua).
@@ -979,9 +979,11 @@ end
 -- Switch page data from /SCRIPTS/WINGMAN/switches.lua, loaded only while the
 -- page is open. A widget call runs tick and drawing within 20,000 Lua
 -- instructions, so the static part (switches, mixes, special functions) is
--- read once per opening, one step per tick, and the view is built again only
--- when a switch, its channel or the stored modes change. Meanwhile the page
--- shows only its frame (SWITCHES_LOADING). Returns the view, or false when
+-- read once per opening, one step per call (ticks and the calls between them),
+-- and the view is built again only when a switch, its channel or the stored
+-- modes change. Meanwhile the page
+-- shows only its frame (SWITCHES_LOADING). w.swPage: 1 the toggle switches,
+-- 2 the buttons (customisable switches). Returns the view, or false when
 -- switches.lua is missing (then w.swMissing: no switch gesture offered).
 local SWITCHES_LOADING = { loading = true, rows = {} }
 local function switchView(w)
@@ -999,16 +1001,17 @@ local function switchView(w)
     w.swBuild = nil
     return SWITCHES_LOADING   -- the view on the next tick
   end
-  local key = w.swMod.stateKey(w.swStatic)
-  if not w.swView or key ~= w.swKey or w.modesEntry ~= w.swModesOf then
-    w.swView, w.swKey, w.swModesOf = w.swMod.view(w.swStatic, w.modesEntry, w.swView), key, w.modesEntry
+  local page = w.swPage or 1
+  local key = w.swMod.stateKey(w.swStatic, page)
+  if not w.swView or key ~= w.swKey or w.modesEntry ~= w.swModesOf or w.swView.page ~= page then
+    w.swView, w.swKey, w.swModesOf = w.swMod.view(w.swStatic, w.modesEntry, w.swView, page), key, w.modesEntry
   end
   return w.swView
 end
 
 local function closeSwitches(w)
-  w.switchOpen, w.sw, w.swMod, w.swStatic, w.swBuild, w.swView, w.swKey, w.swModesOf =
-    nil, nil, nil, nil, nil, nil, nil, nil
+  w.switchOpen, w.sw, w.swMod, w.swStatic, w.swBuild, w.swView, w.swKey, w.swModesOf, w.swPage =
+    nil, nil, nil, nil, nil, nil, nil, nil, nil
 end
 
 -- Channel page: the model's channels with mixes, number and name read once per
@@ -1072,12 +1075,19 @@ end
 
 -- Wait page gestures: elevator picks a menu entry, aileron held right a second
 -- opens it. The last summary stays for ENDED_HOLD_T; on the switch and channel
--- page aileron held left a second goes back. w.waitHold 0..1 (negative while
--- held left on a page) for the hint bar, w.waitHint the menu ({ items, sel }).
+-- page aileron held left a second goes back, on the switch page with buttons
+-- aileron held right turns to the other page. w.waitHold -1..1 (negative while
+-- held left) for the hint bar, w.waitHint the menu ({ items, sel }).
 local function waitGestures(w, now)
   if w.switchOpen or w.chOpen then
-    local hold, done = pollHold(w, now, -1)
-    w.waitHold = -hold
+    local turn = w.switchOpen and w.swStatic and w.swStatic.buttons and (w.ail or 0) > 0
+    local sign = turn and 1 or -1
+    local hold, done = pollHold(w, now, sign)
+    w.waitHold = sign * hold
+    if turn and done then
+      w.swPage = (w.swPage == 2) and 1 or 2
+      done = false
+    end
     if w.switchOpen then
       if done or not w.switchPage or w.setupError then closeSwitches(w)
       else
@@ -1109,7 +1119,7 @@ local function waitGestures(w, now)
   if pick == "review" then
     w.reviewAt, w.phase, w.post = now * 10, M.ENDED, w.postKeep
   elseif pick == "switches" then
-    w.switchOpen, w.sw = true, SWITCHES_LOADING   -- the reading starts on the next tick
+    w.switchOpen, w.sw = true, SWITCHES_LOADING   -- the reading starts on the next call
   else
     w.chOpen, w.ch = true, channelView(w)
   end
@@ -1622,6 +1632,11 @@ function M.tick(w, on)
     -- Calls between ticks carry the QR encoding, so it never shares a call's
     -- instruction budget with the tick.
     if (w.qrJob or w.qrCode) and not pcall(stepQr, w) then w.qrJob, w.qrCode = nil, nil end
+    -- They also read the switch page while it loads (the next tick closes it if due).
+    if w.switchOpen and w.sw and w.sw.loading then
+      local ok, v = pcall(switchView, w)
+      if ok and v then w.sw = v end
+    end
     return
   end
   w.lastTick = now

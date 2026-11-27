@@ -2303,7 +2303,8 @@ end
 -- Switch page: title with the source of the modes, the switches as cards in
 -- rows of four (two left, two right, as on the radio), each with its channel
 -- and per position the FC's modes and the special functions, the current
--- position on a darker band; bottom right the gesture back.
+-- position on a darker band; the stick hint with Exit and, with buttons, the
+-- next page. The button page (view.page 2): the same cards in rows of three.
 -- A card's static part (box, name, channel, bands, tiles, speakers) is laid out
 -- once as drawing calls (rec) and replayed every frame through table.unpack;
 -- only the marquee texts are worked out per frame. Kept on the card while its
@@ -2419,36 +2420,42 @@ do
     local L = flightLayout(z)
     local wide = z.w >= 700
     local x0, right = L.x(18), z.w - L.x(18)
-    drawTitle(L, x0, "SWITCHES")
+    local buttons = v.page == 2
+    local title = buttons and "BUTTONS" or "SWITCHES"
+    drawTitle(L, x0, title)
     -- After opening, the texts are measured over a few frames (cards not yet
     -- drawn) so no frame measures them all; then a few new ones per frame.
     if v.loading then KEPT.ready = false end
     local dry = not KEPT.ready
     KEPT.left, KEPT.missed, KEPT.lays = dry and 24 or 4, false, LAYS
     if v.src then
-      local titleR = x0 + L.s(19) + textW("SWITCHES", L.f.title) + L.x(16)
+      local titleR = x0 + L.s(19) + textW(title, L.f.title) + L.x(16)
       local src = KEPT.cut(v.src, right - titleR, SMLSIZE)
       if src then rtext(right, L.y(31), src, COLORS.muted, SMLSIZE) end
     end
     local top = L.y(46)
     local bottom = z.h - fontH(SMLSIZE) - L.s(26)
     local gap, side = L.x(SW_GAP.card), L.x(SW_GAP.side)
-    local cw = floor((right - x0 - side - 2 * gap) / 4)
+    local cols = v.cols or 4
+    -- Four per row: two left, two right with the wider gap between the sides.
+    local split = cols == 4 and side - gap or 0
+    local cw = floor((right - x0 - split - (cols - 1) * gap) / cols)
     local n = max(1, #v.rows)
     local rgap = L.s(SW_GAP.card)
     local ch = floor((bottom - top - (n - 1) * rgap) / n)
     for r, row in ipairs(v.rows) do
       local y = top + (r - 1) * (ch + rgap)
-      for i = 1, 4 do
+      for i = 1, cols do
         local c = row[i]
         if c then
-          local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and (side - gap) or 0)
+          local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and split or 0)
           drawSwitchCard(c, x, y, cw, ch, wide, now, dry)
         end
       end
     end
     if dry and not v.loading and not KEPT.missed then KEPT.ready = true end
-    drawStickHint(z, { left = "Back", hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
+    drawStickHint(z, { left = "Exit", right = v.more and (buttons and "Switches" or "Buttons") or nil,
+                       hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
   end
 end
 
@@ -2461,7 +2468,7 @@ local function drawChannels(ctx)
   local L = flightLayout(z)
   local x0, right = L.x(18), z.w - L.x(18)
   drawTitle(L, x0, "CHANNELS")
-  local hintY = drawStickHint(z, { left = "Back", hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
+  local hintY = drawStickHint(z, { left = "Exit", hold = ctx.w.waitHold, stick = ctx.w.stick, armed = ctx.w.closeArmed })
   local rows = v.rows
   local top, bottom = L.y(50), hintY - L.s(12)
   if #rows == 0 then

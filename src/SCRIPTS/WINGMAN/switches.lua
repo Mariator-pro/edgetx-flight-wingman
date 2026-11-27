@@ -19,6 +19,8 @@ local CHANNELS  = 16               -- CRSF carries 16 channels
 local MAX_INPUTS = 32              -- input sources are 1..32 in the source list
 local MAX_SF    = 64
 local ROW_SLOTS = 4                -- two cards left, two right
+local BUTTONS   = 6                -- customisable switches SW1..SW6
+local BUTTON_ROW = 3               -- button cards per row
 
 -- Card slots per radio as seen by the pilot: shoulder switches on top, front
 -- switches below, each side from the outside in. Other radios: alphabetical.
@@ -63,28 +65,38 @@ end
 -- Fallback position marks when the radio's own names are not available.
 local SYMBOLS = { "^", "-", "v" }
 
--- Toggle switches of the radio: { key = "SA", id = source index, name = shown
--- name (a custom name from the hardware settings), pos = { { idx, sym, s } } }
--- with the switch position index, its mark and the stick value -100/0/100.
+-- Toggle switches and customisable switches (buttons, n 1..6, only with a type
+-- set in the model) of the radio: { key = "SA", id = source index, name = shown
+-- name (a custom name), button = n, pos = { { idx, sym, s } } } with the switch
+-- position index, its mark and the stick value -100/0/100.
+local function addSwitch(out, key, id, k, button)
+  local sw = { key = key, id = id, name = key, button = button, pos = {} }
+  for p = 1, 3 do
+    local idx = 3 * k + p   -- position index: switch * 3 + up/mid/down, from 1
+    local n = getSwitchName and getSwitchName(idx)
+    if n then
+      local base = string.gsub(n, "[\128-\255%-]+$", "")
+      if base ~= "" then sw.name = base end
+      local sym = string.sub(n, #base + 1)
+      sw.pos[#sw.pos + 1] = { idx = idx, sym = (sym ~= "") and sym or SYMBOLS[p], s = (p - 2) * 100 }
+    end
+  end
+  if #sw.pos > 0 then out[#out + 1] = sw end
+end
+
 function M.scan()
   local out = {}
+  if not getFieldInfo then return out end
   for k = 1, #LETTERS do
     local key = "S" .. string.sub(LETTERS, k, k)
-    local fi = getFieldInfo and getFieldInfo(string.lower(key))
-    if fi and fi.id then
-      local sw = { key = key, id = fi.id, name = key, pos = {} }
-      for p = 1, 3 do
-        local idx = 3 * (k - 1) + p   -- position index: switch * 3 + up/mid/down, from 1
-        local n = getSwitchName and getSwitchName(idx)
-        if n then
-          local base = string.gsub(n, "[\128-\255%-]+$", "")
-          if base ~= "" then sw.name = base end
-          local sym = string.sub(n, #base + 1)
-          sw.pos[#sw.pos + 1] = { idx = idx, sym = (sym ~= "") and sym or SYMBOLS[p], s = (p - 2) * 100 }
-        end
-      end
-      if #sw.pos > 0 then out[#out + 1] = sw end
-    end
+    local fi = getFieldInfo(string.lower(key))
+    if fi and fi.id then addSwitch(out, key, fi.id, k - 1) end
+  end
+  -- Buttons by name; their switch index counts from SA's source index.
+  local first = getFieldInfo("sa")
+  for n = 1, BUTTONS do
+    local fi = first and first.id and getFieldInfo("sw" .. n)
+    if fi and fi.id and fi.id > first.id then addSwitch(out, "SW" .. n, fi.id, fi.id - first.id, n) end
   end
   return out
 end
@@ -92,12 +104,6 @@ end
 -- The one mix line of a channel that takes a switch: weight and offset applied
 -- to the switch value (-100/0/100), through an input with a single line too.
 local function plainNumber(v) return type(v) == "number" and v > -1024 and v < 1024 end
-local function lineRefs(line, sw)
-  if line.source == sw.id then return true end
-  local s = math.abs(line.switch or 0)
-  for _, p in ipairs(sw.pos) do if p.idx == s then return true end end
-  return false
-end
 
 -- Mix lines of all channels, read once: { [ch] = { { mix, input, inputs } } }
 -- with the first line of the input a mix takes and that input's line count.
@@ -122,35 +128,58 @@ function M.mixLines()
   return out
 end
 
--- Channel use of a switch from mixLines: { ch = 1.., simple = { w1, o1, w2,
--- o2 } or nil, out = the channel's output stage, name = mix line name }; nil
--- when no channel takes it. An output curve makes the channel custom.
-function M.channelOf(sw, lines)
+-- Channel use of a switch: { ch = 1.., simple = { w1, o1, w2, o2 } or nil, out =
+-- the channel's output stage, name = mix line name } from the line hit that
+-- takes it on channel ch (0..) with the lines t. An output curve makes the
+-- channel custom.
+local function chanInfo(sw, ch, hit, t)
+  local l, inp = hit.mix, hit.input
+  local c = { ch = ch + 1, name = (l.name ~= "") and l.name or nil }
+  local simple = #t == 1 and (l.switch or 0) == 0 and plainNumber(l.weight) and plainNumber(l.offset)
+  if simple and l.source ~= sw.id then
+    simple = inp and inp.source == sw.id and (inp.switch or 0) == 0 and hit.inputs == 1
+      and plainNumber(inp.weight) and plainNumber(inp.offset)
+  end
+  local o = simple and model.getOutput and model.getOutput(ch)
+  if o and o.curve then simple = false end
+  if simple then
+    c.simple = { l.weight, l.offset, inp and l.source ~= sw.id and inp.weight or 100,
+                 inp and l.source ~= sw.id and inp.offset or 0 }
+    c.out = o or nil
+  end
+  return c
+end
+
+-- Channel use of all switches in one pass over the mix lines: { [sw] = chanInfo }
+-- from the first channel with a line that takes the switch (as source or one of
+-- its positions as condition, also through the line's input), the last such
+-- line there. Switches no channel takes are missing.
+function M.channels(sws, lines)
+  local bySrc, byPos = {}, {}
+  for _, sw in ipairs(sws) do
+    bySrc[sw.id] = sw
+    for _, p in ipairs(sw.pos) do byPos[p.idx] = sw end
+  end
+  local found = {}   -- sw -> { ch, line }
+  local function mark(sw, ch, e)
+    if not sw then return end
+    local f = found[sw]
+    if not f then found[sw] = { ch, e } elseif f[1] == ch then f[2] = e end
+  end
   for ch = 0, CHANNELS - 1 do
-    local t = lines[ch] or {}
-    local hit
-    for _, e in ipairs(t) do
-      if lineRefs(e.mix, sw) or (e.input and lineRefs(e.input, sw)) then hit = e end
-    end
-    if hit then
-      local l, inp = hit.mix, hit.input
-      local c = { ch = ch + 1, name = (l.name ~= "") and l.name or nil }
-      local simple = #t == 1 and (l.switch or 0) == 0 and plainNumber(l.weight) and plainNumber(l.offset)
-      if simple and l.source ~= sw.id then
-        simple = inp and inp.source == sw.id and (inp.switch or 0) == 0 and hit.inputs == 1
-          and plainNumber(inp.weight) and plainNumber(inp.offset)
+    for _, e in ipairs(lines[ch] or {}) do
+      local l, inp = e.mix, e.input
+      if l.source then mark(bySrc[l.source], ch, e) end
+      mark(byPos[math.abs(l.switch or 0)], ch, e)
+      if inp then
+        if inp.source then mark(bySrc[inp.source], ch, e) end
+        mark(byPos[math.abs(inp.switch or 0)], ch, e)
       end
-      local o = simple and model.getOutput and model.getOutput(ch)
-      if o and o.curve then simple = false end
-      if simple then
-        c.simple = { l.weight, l.offset, inp and l.source ~= sw.id and inp.weight or 100,
-                     inp and l.source ~= sw.id and inp.offset or 0 }
-        c.out = o or nil
-      end
-      return c
     end
   end
-  return nil
+  local out = {}
+  for sw, f in pairs(found) do out[sw] = chanInfo(sw, f[1], f[2], lines[f[1]]) end
+  return out
 end
 
 -- Special functions per position index: { [idx] = { "Reset T1", ... } }.
@@ -169,8 +198,8 @@ function M.functions()
 end
 
 -- Card rows for the radio, ROW_SLOTS per row: a known radio only its toggle
--- switches in their slots (customisable buttons sit behind them in the switch
--- list), others alphabetically without the buttons ("SW1".."SW6").
+-- switches in their slots, others alphabetically; never the buttons (their own
+-- page, buttonRows).
 -- radio: getVersion's radio name.
 function M.rows(sws, radio)
   local byKey = {}
@@ -194,10 +223,30 @@ function M.rows(sws, radio)
   end
   local row
   for _, sw in ipairs(sws) do
-    if not string.find(sw.name, "^SW%d") then
+    if not sw.button and not string.find(sw.name, "^SW%d") then
       if not row or #row == ROW_SLOTS then row = {}; rows[#rows + 1] = row end
       row[#row + 1] = sw
     end
+  end
+  return rows
+end
+
+-- Button rows, BUTTON_ROW per row in the radio's order (SW1..SW3 over
+-- SW4..SW6), a button without a type in its slot as false; nil without any.
+function M.buttonRows(sws)
+  local byN, any = {}, false
+  for _, sw in ipairs(sws) do
+    if sw.button then byN[sw.button], any = sw, true end
+  end
+  if not any then return nil end
+  local rows = {}
+  for r = 0, BUTTONS / BUTTON_ROW - 1 do
+    local row, used = {}, false
+    for i = 1, BUTTON_ROW do
+      row[i] = byN[r * BUTTON_ROW + i] or false
+      used = used or row[i] ~= false
+    end
+    if used then rows[#rows + 1] = row end
   end
   return rows
 end
@@ -209,30 +258,28 @@ end
 function M.buildStep(b, radio)
   if not b.sws then b.sws = M.scan(); return nil end
   if not b.lines then b.lines = M.mixLines(); return nil end
-  local sf = M.functions()
+  local sf, chans = M.functions(), M.channels(b.sws, b.lines)
   for _, sw in ipairs(b.sws) do
-    sw.chan = M.channelOf(sw, b.lines)
+    sw.chan = chans[sw]
     for _, p in ipairs(sw.pos) do
       p.sf = sf[p.idx] and table.concat(sf[p.idx], ", ") or nil
       -- A leading "Play: " becomes the speaker glyph on the card.
       if p.sf and string.sub(p.sf, 1, 6) == "Play: " then p.sf, p.play = string.sub(p.sf, 7), true end
     end
   end
-  return { rows = M.rows(b.sws, radio) }
+  return { rows = M.rows(b.sws, radio), buttons = M.buttonRows(b.sws) }
 end
 
--- All steps at once (tests).
-function M.build(radio)
-  local b, st = {}, nil
-  repeat st = M.buildStep(b, radio) until st
-  return st
+-- Card rows of a page: 1 the toggle switches, 2 the buttons.
+local function pageRows(static, page)
+  return page == 2 and static.buttons or static.rows
 end
 
--- What the view depends on besides the stored modes: every switch value and the
--- channel it drives. A new view is built only when this changes.
-function M.stateKey(static)
+-- What the view of a page depends on besides the stored modes: every switch
+-- value and the channel it drives. A new view is built only when this changes.
+function M.stateKey(static, page)
   local t = {}
-  for _, row in ipairs(static.rows) do
+  for _, row in ipairs(pageRows(static, page)) do
     for _, sw in ipairs(row) do
       if sw then
         t[#t + 1] = getValue(sw.id) or 0
@@ -286,7 +333,7 @@ local function modesAt(ranges, aux, v)
   return table.concat(t, ", ")
 end
 
--- µs the FC sees for a switch position on a simple mix (c from channelOf).
+-- µs the FC sees for a switch position on a simple mix (c from channels).
 local function positionUs(c, p)
   local s = c.simple
   return us(M.outPct(c.out, (p.s * s[3] / 100 + s[4]) * s[1] / 100 + s[2]))
@@ -299,9 +346,10 @@ function M.armPosition(ranges)
   for _, r in ipairs(ranges) do
     if r.name == "ARM" then arm[#arm + 1] = r end
   end
-  local lines, found = M.mixLines(), nil
-  for _, sw in ipairs(M.scan()) do
-    local c = M.channelOf(sw, lines)
+  local sws, found = M.scan(), nil
+  local chans = M.channels(sws, M.mixLines())
+  for _, sw in ipairs(sws) do
+    local c = chans[sw]
     if c and c.simple and c.ch >= 5 then
       for _, p in ipairs(sw.pos) do
         if modesAt(arm, c.ch - 4, positionUs(c, p)) ~= "" then
@@ -335,16 +383,18 @@ function M.sourceText(modes)
   return t
 end
 
--- Live view: { src, modes, rows = { { card | false, ... } } }. A card: { name,
--- tag, tagShort, key, pos = { { sym, modes, sf, cur } } }; modes only with FC
--- modes (not ArduPilot), on a custom mix only for the current position. Cards
--- of old (the last view) whose switch and channel did not move are taken over,
--- so the widget keeps what it measured on them.
-function M.view(static, modes, old)
+-- Live view of a page (1 switches, 2 buttons): { src, modes, page, cols (cards
+-- per row), more (a button page exists), rows = { { card | false, ... } } }. A
+-- card: { name, tag, tagShort, key, pos = { { sym, modes, sf, cur } } }; modes
+-- only with FC modes (not ArduPilot), on a custom mix only for the current
+-- position. Cards of old (the last view of the same page) whose switch and
+-- channel did not move are taken over, so the widget keeps what it measured on them.
+function M.view(static, modes, old, page)
+  page = (page == 2 and static.buttons) and 2 or 1
   local ranges = modes and modes.fw ~= "AP" and modes.ranges or nil
-  if old and old.modes ~= modes then old = nil end
+  if old and (old.modes ~= modes or old.page ~= page) then old = nil end
   local rows = {}
-  for r, row in ipairs(static.rows) do
+  for r, row in ipairs(pageRows(static, page)) do
     local out = {}
     for i, sw in ipairs(row) do
       if not sw then out[i] = false else
@@ -389,7 +439,8 @@ function M.view(static, modes, old)
     end
     rows[r] = out
   end
-  return { src = M.sourceText(modes), modes = modes, rows = rows }
+  return { src = M.sourceText(modes), modes = modes, rows = rows, page = page,
+           cols = page == 2 and BUTTON_ROW or ROW_SLOTS, more = static.buttons ~= nil }
 end
 
 return M
