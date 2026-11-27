@@ -2314,11 +2314,13 @@ do
   local SW_GAP = { card = 10, side = 22 }   -- design px between cards, between the two sides
   local LAYS = 2                            -- cards laid out per frame at most
   local floor, max, unpack = math.floor, math.max, table.unpack
+  local shownPage                           -- page of the last frame
 
   -- lay.ops: the static drawing; lay.mq: the marquee texts, 7 slots each (x, y,
-  -- text, width, colour, font, KEPT key).
-  local function layout(c, x, y, w, h, wide)
-    local pad = max(3, floor(8 * w / 180 + 0.5))
+  -- text, width, colour, font, KEPT key). pw: card width the padding follows
+  -- (that of four per row, so both pages get the same tiles).
+  local function layout(c, x, y, w, h, wide, pw)
+    local pad = max(3, floor(8 * pw / 180 + 0.5))
     local fName, fRow, fSym = wide and BOLD or SMLSIZE, SMLSIZE, SMLSIZE
     local nh, lh = fontH(fName), fontH(fRow)
     local right, bottom = x + w - pad, y + h - floor(pad / 2)
@@ -2386,12 +2388,12 @@ do
   -- dry: measure only (texts for KEPT), nothing drawn. At most KEPT.lays cards
   -- are laid out per frame; past that the card is left out and the page goes
   -- back to measuring (KEPT.ready false) until every card has its layout.
-  local function drawSwitchCard(c, x, y, w, h, wide, now, dry)
+  local function drawSwitchCard(c, x, y, w, h, wide, pw, now, dry)
     local lay = c.lay
     if not lay or lay.x ~= x or lay.y ~= y or lay.w ~= w or lay.h ~= h or lay.wide ~= wide or lay.colors ~= COLORS then
       if KEPT.lays <= 0 then KEPT.missed, KEPT.ready = true, false; return end
       KEPT.lays = KEPT.lays - 1
-      lay = layout(c, x, y, w, h, wide)
+      lay = layout(c, x, y, w, h, wide, pw)
       c.lay = lay
     end
     local mq, marquee = lay.mq, KEPT.marquee
@@ -2423,9 +2425,11 @@ do
     local buttons = v.page == 2
     local title = buttons and "BUTTONS" or "SWITCHES"
     drawTitle(L, x0, title)
-    -- After opening, the texts are measured over a few frames (cards not yet
-    -- drawn) so no frame measures them all; then a few new ones per frame.
-    if v.loading then KEPT.ready = false end
+    -- After opening or a page turn, the texts are measured over a few frames
+    -- (cards not yet drawn) so no frame measures them all; then a few new ones
+    -- per frame.
+    if v.loading or v.page ~= shownPage then KEPT.ready = false end
+    shownPage = v.page
     local dry = not KEPT.ready
     KEPT.left, KEPT.missed, KEPT.lays = dry and 24 or 4, false, LAYS
     if v.src then
@@ -2440,6 +2444,7 @@ do
     -- Four per row: two left, two right with the wider gap between the sides.
     local split = cols == 4 and side - gap or 0
     local cw = floor((right - x0 - split - (cols - 1) * gap) / cols)
+    local pw = floor((right - x0 - side - 2 * gap) / 4)
     local n = max(1, #v.rows)
     local rgap = L.s(SW_GAP.card)
     local ch = floor((bottom - top - (n - 1) * rgap) / n)
@@ -2449,7 +2454,7 @@ do
         local c = row[i]
         if c then
           local x = x0 + (i - 1) * (cw + gap) + ((i > 2) and split or 0)
-          drawSwitchCard(c, x, y, cw, ch, wide, now, dry)
+          drawSwitchCard(c, x, y, cw, ch, wide, pw, now, dry)
         end
       end
     end
